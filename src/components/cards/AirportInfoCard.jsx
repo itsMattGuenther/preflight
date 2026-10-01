@@ -53,6 +53,8 @@ export function AirportInfoCard({ airport }) {
         </dl>
       ) : <p className="muted small">No frequencies found. Check the Chart Supplement.</p>}
 
+      {/* Elevation, tower status and variation are already in the header and
+          runway card; only runway dimensions and lighting are unique here. */}
       <table className="info-table">
         <tbody>
           {(airport.runways || []).map((runway) => (
@@ -62,9 +64,6 @@ export function AirportInfoCard({ airport }) {
               <td>{runway.surface}{runway.lighted ? ', lighted' : ''}</td>
             </tr>
           ))}
-          <tr><th>Elevation</th><td colSpan={2}>{formatFeet(airport.elevation_ft)} MSL</td></tr>
-          <tr><th>Tower</th><td colSpan={2}>{airport.towered === true ? 'Towered (check hours)' : airport.towered === false ? 'Non-towered, self-announce on CTAF' : 'Unknown'}</td></tr>
-          {airport.magvar_deg != null ? <tr><th>Variation</th><td colSpan={2}>{Math.abs(airport.magvar_deg)}° {airport.magvar_deg >= 0 ? 'East' : 'West'}</td></tr> : null}
         </tbody>
       </table>
 
