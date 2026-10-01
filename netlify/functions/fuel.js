@@ -1,4 +1,5 @@
-import { requireAuth, json } from './_auth.js';
+import { cached } from '../lib/cache.js';
+import { badRequest, fetchText as fetchTextWithTimeout, handler, json, normalizeIcao } from '../lib/http.js';
 
 const AIRNAV_BASE = 'https://www.airnav.com';
 const REPORT_URL = `${AIRNAV_BASE}/fuel/report.html`;
@@ -24,25 +25,12 @@ const MONTHS = {
   DEC: 11,
 };
 
-function normalizeIcao(value) {
-  const input = String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (/^[A-Z]{3}$/.test(input)) return `K${input}`;
-  return input || 'KVBT';
-}
-
 function fuelUrlFor(icao) {
   return `${AIRNAV_BASE}/airport/${encodeURIComponent(icao)}`;
 }
 
 async function fetchText(url) {
-  const res = await fetch(url, {
-    headers: {
-      Accept: 'text/html',
-      'User-Agent': 'preflight-dashboard/1.0',
-    },
-  });
-  if (!res.ok) throw new Error(`${res.status} ${url}`);
-  return res.text();
+  return fetchTextWithTimeout(url, { headers: { Accept: 'text/html' }, timeoutMs: 6000 });
 }
 
 function escapeRegex(value) {
@@ -448,12 +436,16 @@ function addIndex(fuel, market) {
   };
 }
 
-export default async (req) => {
-  const auth = requireAuth(req.headers);
-  if (!auth.ok) return json({ error: auth.message }, { status: auth.status });
+// AirNav prices change at most daily, so each airport is scraped at most every
+// six hours and the national report every twelve. Without this, every page
+// view triggered up to eight AirNav requests.
+const LOCAL_TTL_MS = 6 * 60 * 60 * 1000;
+const REPORT_TTL_MS = 12 * 60 * 60 * 1000;
 
+export default handler(async (req) => {
   const url = new URL(req.url);
   const icao = normalizeIcao(url.searchParams.get('icao'));
+  if (!icao) return badRequest('icao is required');
   const airportUrl = fuelUrlFor(icao);
   const warnings = [];
   let local = {
@@ -470,18 +462,20 @@ export default async (req) => {
 
   // Local and market feeds are independent, so a failure in one should not hide
   // the other. allSettled lets us return warnings with whatever data survived.
-  const [airportResult, reportResult] = await Promise.allSettled([fetchText(airportUrl), fetchText(REPORT_URL)]);
+  const [localResult, reportResult] = await Promise.allSettled([
+    cached(`fuel/v1/local/${icao}`, LOCAL_TTL_MS, async () => parseLocalFuel(icao, await fetchText(airportUrl), airportUrl)),
+    cached('fuel/v1/report', REPORT_TTL_MS, async () => parseMarket(await fetchText(REPORT_URL))),
+  ]);
 
-  if (airportResult.status === 'fulfilled') {
-    const parsed = await parseLocalFuel(icao, airportResult.value, airportUrl);
-    local = parsed.local;
-    warnings.push(...parsed.warnings);
+  if (localResult.status === 'fulfilled') {
+    local = localResult.value.value.local;
+    warnings.push(...localResult.value.value.warnings);
   } else {
     warnings.push(`AirNav airport fuel page unavailable for ${icao}; local prices are not displayed.`);
   }
 
   if (reportResult.status === 'fulfilled') {
-    market = parseMarket(reportResult.value);
+    market = reportResult.value.value;
   } else {
     warnings.push('AirNav fuel price report unavailable; market comparisons are hidden.');
   }
@@ -490,7 +484,7 @@ export default async (req) => {
 
   return json(
     {
-      fetched_utc: new Date().toISOString(),
+      fetched_utc: localResult.status === 'fulfilled' ? localResult.value.cached_utc : new Date().toISOString(),
       local: {
         ...local,
         fuels: local.fuels.map((fuel) => addIndex(fuel, market)),
@@ -504,4 +498,4 @@ export default async (req) => {
     },
     { headers: { 'Cache-Control': 'public, max-age=900' } },
   );
-};
+});

@@ -1,17 +1,21 @@
 {
   "name": "preflight",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "netlify dev",
     "vite-only": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint src --ext .js,.jsx"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src netlify",
+    "build:airports": "node scripts/build-airport-data.mjs"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",
+    "@photostructure/tz-lookup": "^11.7.0",
     "@tanstack/react-query": "^5.51.0",
     "date-fns": "^3.6.0",
     "date-fns-tz": "^3.1.0",
@@ -29,6 +33,10 @@
     "netlify-cli": "^17.36.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
-    "vite": "^5.4.0"
+    "vite": "^5.4.0",
+    "vitest": "^2.1.9"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

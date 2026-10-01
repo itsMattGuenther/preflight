@@ -1,113 +1,90 @@
-import { requireAuth, json } from './_auth.js';
+import { cached } from '../lib/cache.js';
+import { fetchJson, handler, json, normalizeIcao } from '../lib/http.js';
 
-const KVBT_IMAGE = 'https://images.squarespace-cdn.com/content/v1/67f3ee1006d37e724190ac27/2eac87a2-5c81-4d45-a6ea-e56aca8203ad/Thaden-Exteriors-HR-007.jpg';
+// Optional hero photo for the selected airport, from Wikipedia/Wikimedia
+// Commons. Commons images are freely licensed but most licenses require
+// attribution, so the photographer and license are returned with the URL and
+// shown on the page.
 const WIKIPEDIA_API = 'https://en.wikipedia.org/w/api.php';
+const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-function normalizeIcao(value) {
-  const input = String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (/^[A-Z]{3}$/.test(input)) return `K${input}`;
-  return input || 'KVBT';
-}
-
-function airportImageSearches(icao, name) {
-  // Try both the full airport name and identifiers. Some Wikipedia pages use
-  // FAA IDs while others use ICAO IDs.
-  const cleanName = String(name || '').replace(/\s+/g, ' ').trim();
-  const searches = [
-    cleanName ? `${cleanName} airport` : '',
-    `${icao} airport`,
-    icao.startsWith('K') ? `${icao.slice(1)} airport` : '',
-  ].filter(Boolean);
-  return [...new Set(searches)];
+function stripHtml(value) {
+  return String(value || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 }
 
 function scorePage(page, icao, name) {
-  // Search results are fuzzy. Score likely airport pages higher before choosing
-  // the lead image.
-  const title = String(page.title || '');
-  const upperTitle = title.toUpperCase();
+  const title = String(page.title || '').toUpperCase();
   const shortCode = icao.replace(/^K/, '');
-  const nameWords = String(name || '')
-    .toUpperCase()
-    .split(/[^A-Z0-9]+/)
-    .filter((word) => word.length > 3)
-    .slice(0, 4);
-
+  const nameWords = String(name || '').toUpperCase().split(/[^A-Z0-9]+/).filter((word) => word.length > 3).slice(0, 4);
   let score = 0;
-  if (/AIRPORT|AIR FIELD|AIRFIELD|AERODROME/i.test(title)) score += 5;
-  if (upperTitle.includes(icao) || upperTitle.includes(shortCode)) score += 3;
-  score += nameWords.filter((word) => upperTitle.includes(word)).length;
+  if (/AIRPORT|AIR FIELD|AIRFIELD|AERODROME|AIRPARK/.test(title)) score += 5;
+  if (title.includes(icao) || title.includes(shortCode)) score += 3;
+  score += nameWords.filter((word) => title.includes(word)).length * 2;
   return score;
 }
 
-async function wikipediaImageFor(search, icao, name) {
-  // Wikipedia is used only for optional hero imagery; failures return null so
-  // the dashboard can fall back to its non-image background.
+async function search(term, icao, name) {
   const params = new URLSearchParams({
     action: 'query',
     generator: 'search',
-    gsrsearch: search,
-    gsrlimit: '8',
+    gsrsearch: term,
+    gsrlimit: '6',
     prop: 'pageimages|info',
     inprop: 'url',
-    piprop: 'thumbnail|original',
-    pithumbsize: '1800',
+    piprop: 'name|thumbnail',
+    pithumbsize: '1600',
     format: 'json',
   });
-  const res = await fetch(`${WIKIPEDIA_API}?${params}`, {
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': 'preflight-dashboard/1.0',
-    },
-  });
-  if (!res.ok) throw new Error(`${res.status} Wikipedia image search failed`);
-  const body = await res.json();
-  const pages = Object.values(body.query?.pages || {})
-    .filter((page) => page.thumbnail?.source || page.original?.source)
+  const body = await fetchJson(`${WIKIPEDIA_API}?${params}`, { timeoutMs: 5000 });
+  return Object.values(body.query?.pages || {})
+    // Photos only: SVG/PNG page images are usually location maps, logos or
+    // FAA diagrams, which make a poor background.
+    .filter((page) => page.thumbnail?.source && /\.jpe?g$/i.test(page.pageimage || ''))
     .map((page) => ({ ...page, score: scorePage(page, icao, name) }))
-    .sort((a, b) => b.score - a.score);
-  const page = pages.find((candidate) => candidate.score > 0) || pages[0];
-  if (!page) return null;
+    .filter((page) => page.score >= 5)
+    .sort((a, b) => b.score - a.score)[0] || null;
+}
+
+async function credit(fileName) {
+  const params = new URLSearchParams({
+    action: 'query',
+    titles: `File:${fileName}`,
+    prop: 'imageinfo',
+    iiprop: 'extmetadata|url',
+    format: 'json',
+  });
+  const body = await fetchJson(`${WIKIPEDIA_API}?${params}`, { timeoutMs: 5000 });
+  const info = Object.values(body.query?.pages || {})[0]?.imageinfo?.[0];
+  const meta = info?.extmetadata || {};
   return {
-    image_url: page.thumbnail?.source || page.original?.source,
-    source_label: 'Wikipedia / Wikimedia Commons',
-    source_url: page.fullurl || `https://en.wikipedia.org/?curid=${page.pageid}`,
-    title: page.title,
+    artist: stripHtml(meta.Artist?.value) || null,
+    license: stripHtml(meta.LicenseShortName?.value) || null,
+    license_url: meta.LicenseUrl?.value || null,
+    file_url: info?.descriptionurl || null,
   };
 }
 
-export default async (req) => {
-  const auth = requireAuth(req.headers);
-  if (!auth.ok) return json({ error: auth.message }, { status: auth.status });
-
-  const url = new URL(req.url);
-  const icao = normalizeIcao(url.searchParams.get('icao'));
-  const name = url.searchParams.get('name') || '';
-
-  if (icao === 'KVBT') {
-    return json(
-      {
-        image_url: KVBT_IMAGE,
-        source_label: 'Legends Air Center',
-        source_url: 'https://legendsaircenter.com/',
-      },
-      { headers: { 'Cache-Control': 'public, max-age=604800' } },
-    );
-  }
-
-  for (const search of airportImageSearches(icao, name)) {
-    const image = await wikipediaImageFor(search, icao, name).catch(() => null);
-    if (image?.image_url) {
-      return json(image, { headers: { 'Cache-Control': 'public, max-age=604800' } });
+async function findImage(icao, name) {
+  const terms = [...new Set([name ? `${name} airport` : '', `${icao} airport`, icao.startsWith('K') ? `${icao.slice(1)} airport` : ''].filter(Boolean))];
+  for (const term of terms) {
+    const page = await search(term, icao, name).catch(() => null);
+    if (page) {
+      return {
+        image_url: page.thumbnail.source,
+        article_url: page.fullurl,
+        article_title: page.title,
+        credit: await credit(page.pageimage).catch(() => null),
+      };
     }
   }
+  return { image_url: null };
+}
 
-  return json(
-    {
-      image_url: null,
-      source_label: null,
-      source_url: null,
-    },
-    { headers: { 'Cache-Control': 'public, max-age=86400' } },
-  );
-};
+export default handler(async (req) => {
+  const url = new URL(req.url);
+  const icao = normalizeIcao(url.searchParams.get('icao'));
+  const name = String(url.searchParams.get('name') || '').slice(0, 120);
+  if (!icao) return json({ image_url: null });
+  const { value } = await cached(`image/v2/${icao}`, TTL_MS, () => findImage(icao, name));
+  return json(value, { headers: { 'Cache-Control': 'public, max-age=86400' } });
+});
