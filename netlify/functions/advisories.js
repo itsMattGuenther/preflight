@@ -129,14 +129,16 @@ function intensity(value) {
 function pirepSummary(item) {
   const parts = [];
   const turbulence = intensity(item.tbInt1);
-  if (turbulence) parts.push(`${turbulence} turbulence${item.tbType1 ? ` (${item.tbType1})` : ''}`);
+  if (turbulence === 'none' || turbulence === 'smooth') parts.push('smooth air');
+  else if (turbulence) parts.push(`${turbulence} turbulence${item.tbType1 ? ` (${item.tbType1})` : ''}`);
   const icing = intensity(item.icgInt1);
-  if (icing) parts.push(`${icing} icing${item.icgType1 ? ` (${String(item.icgType1).toLowerCase()})` : ''}`);
+  if (icing === 'none') parts.push('no icing');
+  else if (icing) parts.push(`${icing} icing${item.icgType1 ? ` (${String(item.icgType1).toLowerCase()})` : ''}`);
   const clouds = Array.isArray(item.clouds) ? item.clouds : [];
   clouds.slice(0, 2).forEach((cloud) => {
     if (!cloud?.cover) return;
     const base = cloud.base != null ? `${Number(cloud.base).toLocaleString('en-US')}` : '?';
-    const top = cloud.top != null ? `${Number(cloud.top).toLocaleString('en-US')}` : null;
+    const top = cloud.top != null && Number(cloud.top) > Number(cloud.base || 0) ? `${Number(cloud.top).toLocaleString('en-US')}` : null;
     parts.push(`${cloud.cover} ${base}${top ? `-${top}` : ''} ft`);
   });
   if (item.wxString) parts.push(item.wxString);
@@ -161,8 +163,8 @@ async function pireps(center) {
         distance_nm: round1(distanceNm(center, point)),
         bearing_deg: bearingDeg(center, point),
         urgent: item.pirepType === 'Urgent PIREP' || /\bUUA\b/.test(item.rawOb || ''),
-        turbulence: intensity(item.tbInt1),
-        icing: intensity(item.icgInt1),
+        turbulence: ['none', 'smooth'].includes(intensity(item.tbInt1)) ? null : intensity(item.tbInt1),
+        icing: intensity(item.icgInt1) === 'none' ? null : intensity(item.icgInt1),
         summary: pirepSummary(item) || 'No significant weather reported',
         raw: item.rawOb,
       };

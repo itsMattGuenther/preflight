@@ -231,16 +231,17 @@ export function evaluateMinimums({
 
   // Weather hazards (thunderstorms, freezing precipitation, etc.).
   let hazardRow = { ...check('weather', 'Weather hazards', 'None'), value: 'None reported' };
-  const hazardNotes = [];
+  const hazardSets = new Map();
   for (const set of sets) {
-    const hazards = weatherHazards(set.conditions);
-    for (const hazard of hazards) {
+    for (const hazard of weatherHazards(set.conditions)) {
       const status = set.kind === 'possible' && hazard.level === 'fail' ? 'caution' : hazard.level;
-      hazardNotes.push(`${hazard.label} (${set.label})`);
+      hazardSets.set(hazard.label, [...new Set([...(hazardSets.get(hazard.label) || []), set.label])]);
       if (STATUS_RANK[status] > STATUS_RANK[hazardRow.status]) hazardRow = { ...hazardRow, status, value: hazard.label };
     }
   }
-  if (hazardNotes.length) hazardRow.note = [...new Set(hazardNotes)].slice(0, 3).join('; ');
+  if (hazardSets.size) {
+    hazardRow.note = [...hazardSets].slice(0, 3).map(([label, when]) => `${label}: ${when.join(', ')}`).join('; ');
+  }
   checks.push(hazardRow);
 
   // Density altitude only exists for current conditions (TAFs carry no temp).
@@ -285,8 +286,10 @@ export function evaluateMinimums({
     }
   }
 
-  // TFRs.
-  if (tfrs) {
+  // TFRs (undefined while loading, null if the feed failed).
+  if (tfrs === undefined) {
+    checks.push({ ...check('tfr', 'TFRs', 'None within 10 NM'), status: 'unknown', value: 'Loading…' });
+  } else if (tfrs) {
     const relevant = tfrs.filter((tfr) => tfr.distance_nm <= 10);
     const blocking = relevant.find((tfr) => tfr.inside && tfr.active !== false);
     const nearbyActive = relevant.find((tfr) => tfr.active);
@@ -304,21 +307,26 @@ export function evaluateMinimums({
   }
 
   // Weather advisories over the field.
-  if (advisories) {
+  if (advisories === undefined) {
+    checks.push({ ...check('advisories', 'SIGMETs / AIRMETs', 'None over field'), status: 'unknown', value: 'Loading…' });
+  } else if (advisories) {
     const over = [...(advisories.sigmets || []), ...(advisories.cwas || []), ...(advisories.gairmets || [])].filter((item) => item.over_field);
     const relevant = over.filter((item) => item.hazard !== 'TURB-HI');
     const severe = relevant.find((item) => item.kind?.includes('SIGMET') || (item.kind === 'Center Weather Advisory' && /TS/.test(item.hazard || '')));
+    // Mountain obscuration and icing well above pattern altitude matter for
+    // cross-countries but not for a local flight, so they are shown as info.
+    const isCaution = (item) => !['MT_OBSC', 'ICE'].includes(item.hazard) || (item.hazard === 'ICE' && (item.base_ft ?? 0) <= 5000);
+    const cautions = relevant.filter(isCaution);
+    const label = (items) => items.map((item) => item.label || item.hazard).filter((value, index, list) => list.indexOf(value) === index).slice(0, 2).join(', ');
+    const base = check('advisories', 'SIGMETs / AIRMETs', 'None over field');
     if (severe) {
-      checks.push({ ...check('advisories', 'SIGMETs / AIRMETs', 'None over field'), status: 'fail', value: `${severe.kind} in effect`, note: severe.hazard });
+      checks.push({ ...base, status: 'fail', value: `${severe.kind} in effect`, note: severe.hazard });
+    } else if (cautions.length) {
+      checks.push({ ...base, status: 'caution', value: label(cautions), note: 'AIRMET-level hazard forecast over the airport' });
     } else if (relevant.length) {
-      checks.push({
-        ...check('advisories', 'SIGMETs / AIRMETs', 'None over field'),
-        status: 'caution',
-        value: relevant.map((item) => item.label || item.hazard).slice(0, 2).join(', '),
-        note: 'AIRMET-level hazard forecast over the airport',
-      });
+      checks.push({ ...base, status: 'info', value: label(relevant), note: 'Forecast over the area; matters most if you leave the pattern' });
     } else {
-      checks.push({ ...check('advisories', 'SIGMETs / AIRMETs', 'None over field'), value: 'None over the field' });
+      checks.push({ ...base, value: 'None over the field' });
     }
   } else {
     notChecked.push('SIGMETs/AIRMETs: feed unavailable');

@@ -1,40 +1,47 @@
 import react from 'eslint-plugin-react';
+import reactHooks from 'eslint-plugin-react-hooks';
+
+const browser = {
+  AbortSignal: 'readonly',
+  Blob: 'readonly',
+  Intl: 'readonly',
+  Response: 'readonly',
+  URL: 'readonly',
+  URLSearchParams: 'readonly',
+  console: 'readonly',
+  document: 'readonly',
+  fetch: 'readonly',
+  navigator: 'readonly',
+  process: 'readonly',
+  window: 'readonly',
+};
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**'],
+    ignores: ['dist/**', 'node_modules/**', '.netlify/**'],
   },
   {
-    files: ['src/**/*.{js,jsx}', 'netlify/functions/**/*.js'],
+    files: ['src/**/*.{js,jsx}', 'netlify/**/*.js', 'scripts/**/*.mjs'],
     languageOptions: {
-      ecmaVersion: 2022,
+      ecmaVersion: 2023,
       sourceType: 'module',
       parserOptions: {
         ecmaFeatures: { jsx: true },
       },
-      globals: {
-        Blob: 'readonly',
-        Response: 'readonly',
-        URL: 'readonly',
-        URLSearchParams: 'readonly',
-        console: 'readonly',
-        document: 'readonly',
-        fetch: 'readonly',
-        import: 'readonly',
-        process: 'readonly',
-        window: 'readonly',
-      },
+      globals: browser,
     },
-    plugins: { react },
+    plugins: { react, 'react-hooks': reactHooks },
     settings: {
       react: { version: 'detect' },
     },
     rules: {
+      ...react.configs.recommended.rules,
+      ...reactHooks.configs.recommended.rules,
       'react/jsx-uses-react': 'off',
-      'react/jsx-uses-vars': 'warn',
       'react/react-in-jsx-scope': 'off',
       'react/prop-types': 'off',
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      'no-undef': 'error',
     },
   },
 ];

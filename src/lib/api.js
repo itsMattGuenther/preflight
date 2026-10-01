@@ -1,22 +1,23 @@
 const TOKEN = import.meta.env.VITE_API_AUTH_TOKEN;
 
-export async function apiFetch(path, options = {}) {
-  // All browser-to-function calls go through here so the bearer token and JSON
-  // headers stay consistent. Netlify functions reject requests without the
-  // matching API_AUTH_TOKEN.
-  const res = await fetch(path, {
-    ...options,
-    headers: {
-      ...options.headers,
-      Authorization: `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json',
-    },
+// Every browser-to-function call goes through here so the bearer token and
+// error shape stay consistent. Functions reject requests without the token.
+export async function apiFetch(name, params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+  const res = await fetch(`/.netlify/functions/${name}${query.size ? `?${query}` : ''}`, {
+    headers: { Authorization: `Bearer ${TOKEN}` },
   });
   if (!res.ok) {
-    // Preserve the function's response body; it usually contains the specific
-    // external feed or validation failure that caused the request to fail.
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
+    let message = `${res.status}`;
+    try {
+      const body = await res.json();
+      message = body.error || message;
+    } catch {
+      // Non-JSON error body; keep the status code.
+    }
+    const error = new Error(message);
+    error.status = res.status;
+    throw error;
   }
   return res.json();
 }
