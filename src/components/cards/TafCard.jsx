@@ -79,7 +79,8 @@ export function TafCard({ weather, airport, windowRange, now }) {
     >
       {source && !source.is_field ? (
         <Notice tone="info">
-          No TAF for {airport?.icao}. Showing <strong>{source.icao}</strong> ({source.name}), {source.distance_nm} NM {cardinal(source.bearing_deg)}.
+          {source.reason === 'no_current_report' ? `No current TAF from ${airport?.icao}.` : `No TAF for ${airport?.icao}.`}{' '}
+          Showing <strong>{source.icao}</strong> ({source.name}), {source.distance_nm} NM {cardinal(source.bearing_deg)}.
         </Notice>
       ) : null}
 

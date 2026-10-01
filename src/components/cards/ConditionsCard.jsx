@@ -76,8 +76,9 @@ export function ConditionsCard({ weather, airport, lastSeen, now }) {
       meta={`${formatZulu(metar.observed_utc)} · ${formatLocal(metar.observed_utc, tz)} · ${timeAgo(metar.observed_utc, now)}`}
     >
       {source && !source.is_field ? (
-        <Notice tone="info">
-          {airport?.icao} has no weather reporting. Showing <strong>{source.icao}</strong> ({source.name}), {source.distance_nm} NM {cardinal(source.bearing_deg)}.
+        <Notice tone={source.reason === 'no_current_report' ? 'warning' : 'info'}>
+          {source.reason === 'no_current_report' ? `No current report from ${airport?.icao}.` : `${airport?.icao} has no weather reporting.`}{' '}
+          Showing <strong>{source.icao}</strong> ({source.name}), {source.distance_nm} NM {cardinal(source.bearing_deg)}.
         </Notice>
       ) : null}
       {ageMin > 75 ? <Notice tone="warning">This observation is {ageMin} minutes old. Conditions may have changed.</Notice> : null}

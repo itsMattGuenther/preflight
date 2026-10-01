@@ -67,6 +67,11 @@ export default handler(async (req) => {
     center ? stationsNear(center, TAF_FALLBACK_RADIUS_NM) : Promise.resolve([]),
   ]);
 
+  // Whether the field itself is a reporting station decides how a fallback is
+  // explained: "no weather reporting here" vs "no current report right now".
+  const fieldStation = stations.find((station) => station.icao === icao);
+  const fieldHas = (type) => (fieldStation ? fieldStation.site_types.includes(type) : null);
+
   let metarList = (Array.isArray(metars) ? metars : []).sort((a, b) => Date.parse(b.reportTime) - Date.parse(a.reportTime));
   let metarSource = { icao, name: metarList[0]?.name || null, distance_nm: 0, bearing_deg: null, is_field: true };
 
@@ -76,7 +81,7 @@ export default handler(async (req) => {
       const sorted = (Array.isArray(nearby) ? nearby : []).sort((a, b) => Date.parse(b.reportTime) - Date.parse(a.reportTime));
       if (sorted.length && isRecent(sorted[0])) {
         metarList = sorted;
-        metarSource = { ...station, is_field: false };
+        metarSource = { ...station, is_field: false, reason: fieldHas('METAR') ? 'no_current_report' : 'no_reporting' };
         break;
       }
     }
@@ -90,7 +95,7 @@ export default handler(async (req) => {
       const nearby = await fetchJson(`${API_BASE}/taf?ids=${station.icao}&format=json`).catch(() => []);
       if (Array.isArray(nearby) && nearby[0]) {
         taf = nearby[0];
-        tafSource = { ...station, is_field: false };
+        tafSource = { ...station, is_field: false, reason: fieldHas('TAF') ? 'no_current_report' : 'no_reporting' };
       }
     }
   }

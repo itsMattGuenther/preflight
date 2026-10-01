@@ -383,7 +383,9 @@ export function evaluateMinimums({
       ...check('wx_source', 'Weather source', 'On-field'),
       status: 'info',
       value: `${metarSource.icao}, ${metarSource.distance_nm} NM ${padHeading(metarSource.bearing_deg)}°`,
-      note: 'This airport has no weather reporting; nearest station shown',
+      note: metarSource.reason === 'no_current_report'
+        ? 'No current report from this airport; nearest station shown'
+        : 'This airport has no weather reporting; nearest station shown',
     });
   }
 
