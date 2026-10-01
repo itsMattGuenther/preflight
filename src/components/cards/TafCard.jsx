@@ -39,8 +39,8 @@ function changeLabel(period, tz) {
     case 'BASE': return `From ${from}`;
     case 'FM': return `From ${from}`;
     case 'BECMG': return `Becoming, ${from}`;
-    case 'TEMPO': return `Temporarily ${formatLocal(period.from_utc, tz, 'h a')}–${to}`;
-    case 'PROB': return `${period.probability ?? ''}% chance ${formatLocal(period.from_utc, tz, 'h a')}–${to}`;
+    case 'TEMPO': return `Temporarily ${formatLocal(period.from_utc, tz, 'EEE h a')}–${to}`;
+    case 'PROB': return `${period.probability ?? ''}% chance ${formatLocal(period.from_utc, tz, 'EEE h a')}–${to}`;
     default: return from;
   }
 }
