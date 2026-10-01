@@ -188,11 +188,10 @@ export default function App() {
           </section>
         ) : (
           <>
-            <AirportHeader airport={airport} image={image.data} sun={sunToday} now={now} isHome={home === airport?.icao} onToggleHome={toggleHome} />
+            <AirportHeader airport={airport} image={image.data} sun={sunToday} now={now} isHome={home === airport?.icao} onToggleHome={toggleHome} charts={charts} />
             {/* Rows group related cards: the go/no-go picture first, then the
                 forecast, the field itself, traffic, and reference info. */}
             <div className="rows">
-              <h2 className="section-title">Go / no-go</h2>
               <div className="row row-lead">
                 <MinimumsCard
                   evaluation={evaluation}

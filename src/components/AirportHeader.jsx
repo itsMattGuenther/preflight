@@ -1,6 +1,7 @@
-import { Home, Moon, Sun } from 'lucide-react';
+import { FileText, Headphones, Home, Map, Moon, Radio, Sun, Sunrise, Sunset, TriangleAlert } from 'lucide-react';
 import { lightingPhase } from '../lib/aviation/sun';
 import { formatDuration, formatFeet, formatLocal, formatLocalWithZone, formatZulu } from '../lib/format';
+import { liveAtcUrl, skyVectorUrl } from '../lib/links';
 
 function primaryFrequency(airport) {
   const freqs = airport?.frequencies || [];
@@ -15,7 +16,39 @@ function longestRunway(airport) {
   return [...(airport?.runways || [])].sort((a, b) => (b.length_ft || 0) - (a.length_ft || 0))[0] || null;
 }
 
-export function AirportHeader({ airport, image, sun, now, isHome, onToggleHome }) {
+// Quick links to the references a pilot opens most: the FAA airport diagram
+// (or the Chart Supplement sketch for fields without one), hot spots, LAHSO,
+// LiveATC and SkyVector.
+function QuickLinks({ airport, charts }) {
+  const data = charts?.data;
+  const supplement = data?.chart_supplement?.pages?.[0];
+  const links = [];
+  if (data?.diagram) links.push({ href: data.diagram.url, icon: Map, label: 'Airport diagram' });
+  if (supplement) links.push({ href: supplement, icon: FileText, label: 'Chart Supplement' });
+  if (data?.hot_spots?.[0]) links.push({ href: data.hot_spots[0].url, icon: TriangleAlert, label: 'Hot spots' });
+  if (data?.lahso?.[0]) links.push({ href: data.lahso[0].url, icon: TriangleAlert, label: 'LAHSO' });
+  links.push({ href: liveAtcUrl(airport.icao), icon: Headphones, label: 'LiveATC' });
+  links.push({ href: skyVectorUrl(airport), icon: Map, label: 'SkyVector' });
+
+  return (
+    <div className="quick-links">
+      {links.map((link) => (
+        <a key={link.label} className="quick-link" href={link.href} target="_blank" rel="noreferrer">
+          <link.icon size={13} aria-hidden="true" />
+          {link.label}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function variationText(deg) {
+  if (deg == null) return null;
+  if (deg === 0) return 'Var 0°';
+  return `Var ${Math.abs(deg)}°${deg > 0 ? 'E' : 'W'}`;
+}
+
+export function AirportHeader({ airport, image, sun, now, isHome, onToggleHome, charts }) {
   const tz = airport?.timezone;
   const freq = primaryFrequency(airport);
   const longest = longestRunway(airport);
@@ -27,6 +60,7 @@ export function AirportHeader({ airport, image, sun, now, isHome, onToggleHome }
     airport?.elevation_ft != null ? `Elev ${formatFeet(airport.elevation_ft)}` : null,
     airport?.towered === true ? 'Towered' : airport?.towered === false ? 'Non-towered' : null,
     longest ? `RWY ${longest.id} · ${formatFeet(longest.length_ft)} ${longest.surface?.toLowerCase() || ''}`.trim() : null,
+    variationText(airport?.magvar_deg),
   ].filter(Boolean);
 
   return (
@@ -51,21 +85,30 @@ export function AirportHeader({ airport, image, sun, now, isHome, onToggleHome }
         </div>
         <h1 className="airport-name">{airport?.name || 'Loading airport…'}</h1>
         <p className="airport-place">{[airport?.city, airport?.state].filter(Boolean).join(', ')}</p>
-        <p className="airport-facts">
-          {freq ? <strong>{freq.label} {freq.value.match(/\b1[1-3]\d\.\d{1,3}\b/)?.[0] || freq.value.split(/\s/)[0]}</strong> : null}
-          {chips.map((chip) => <span key={chip}>{chip}</span>)}
-        </p>
+        <div className="airport-chips">
+          {freq ? (
+            <span className="chip chip-strong"><Radio size={12} /> {freq.label} {freq.value.match(/\b1[1-3]\d\.\d{1,3}\b/)?.[0] || freq.value.split(/\s/)[0]}</span>
+          ) : null}
+          {chips.map((chip) => <span key={chip} className="chip">{chip}</span>)}
+        </div>
+        {airport ? <QuickLinks airport={airport} charts={charts} /> : null}
       </div>
 
       <div className="airport-clock" aria-label="Current time">
         <div className="clock-zulu">{formatZulu(now, 'HHmm').slice(0, -1)}</div>
         <div className="clock-local">{formatLocalWithZone(now, tz, 'h:mm a')} local</div>
+        {sun?.sunrise && sun?.sunset ? (
+          <div className="clock-sun">
+            <span><Sunrise size={13} /> {formatLocal(sun.sunrise, tz)}</span>
+            <span><Sunset size={13} /> {formatLocal(sun.sunset, tz)}</span>
+          </div>
+        ) : null}
         {phase ? (
           <div className={`clock-phase phase-${phase}`}>
             {phase === 'day' ? <Sun size={13} /> : <Moon size={13} />}
             {phase === 'day' && untilSunset > 0
-              ? `Sunset ${formatLocal(sun.sunset, tz)} · ${formatDuration(untilSunset)} left`
-              : phase === 'twilight' ? 'Civil twilight · lights on' : `Night · sunrise ${formatLocal(sun.sunrise, tz)}`}
+              ? `${formatDuration(untilSunset)} of daylight left`
+              : phase === 'twilight' ? 'Civil twilight · lights on' : 'Night'}
           </div>
         ) : null}
       </div>

@@ -7,8 +7,8 @@
      small section label, never with nested boxes, pills or borders.
    - Color has a job or it isn't used: status (go/caution/no-go, icon +
      label), flight category (the aviation-standard four), data marks (cyan),
-     and one quiet accent for links/focus. Brand orange is the logo only;
-     pilots read orange as "caution".
+     and one quiet accent for links/focus. Brand orange stays in the logo
+     and the airport header; pilots read orange as "caution" elsewhere.
    - Four type sizes: 11 (labels, footnotes), 13 (body), 16 (row values,
      emphasis), 28 (one hero value per card).
    - Spacing on a 4/8/16/24/32 scale.
@@ -582,6 +582,7 @@ button.chip:hover {
 .rows {
   display: grid;
   gap: 16px;
+  margin-top: 16px;
 }
 
 .row {
@@ -595,10 +596,6 @@ button.chip:hover {
   color: var(--text-2);
   font-size: var(--t-md);
   font-weight: 650;
-}
-
-.section-title:first-child {
-  margin-top: 8px;
 }
 
 @media (min-width: 900px) {
@@ -671,12 +668,12 @@ button.chip:hover {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 24px;
+  gap: 20px;
   overflow: hidden;
-  padding: 28px 28px 26px;
+  padding: 26px 28px 24px;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: linear-gradient(120deg, #0c1f38 0%, #091829 60%, #0a1424 100%);
+  background: linear-gradient(120deg, #0d2340 0%, #091a30 55%, #0a1424 100%);
   isolation: isolate;
 }
 
@@ -688,7 +685,7 @@ button.chip:hover {
   background-image: var(--photo);
   background-size: cover;
   background-position: center 60%;
-  opacity: 0.45;
+  opacity: 0.55;
 }
 
 .airport-header::after {
@@ -696,51 +693,54 @@ button.chip:hover {
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: linear-gradient(90deg, rgba(5, 12, 22, 0.95) 0%, rgba(5, 12, 22, 0.78) 50%, rgba(5, 12, 22, 0.9) 100%);
+  background:
+    linear-gradient(90deg, rgba(5, 12, 22, 0.94) 0%, rgba(5, 12, 22, 0.72) 48%, rgba(5, 12, 22, 0.86) 100%),
+    radial-gradient(600px 300px at 90% 0%, rgba(111, 211, 239, 0.12), transparent 70%);
 }
 
 .airport-ident {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
 }
 
 .ident {
   font-family: var(--mono);
-  font-size: 34px;
+  font-size: 40px;
   font-weight: 800;
   line-height: 1;
+  letter-spacing: 0.02em;
 }
 
 .ident-alt {
   color: var(--muted);
-  font-size: var(--t-xs);
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.04em;
 }
 
 .home-toggle {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 0;
-  border: 0;
-  background: none;
+  padding: 3px 9px;
+  border: 1px solid rgba(148, 178, 214, 0.24);
+  border-radius: 999px;
+  background: rgba(5, 11, 20, 0.5);
   color: var(--muted);
-  font-size: var(--t-xs);
+  font-size: 11.5px;
   font-weight: 700;
 }
 
-.home-toggle:hover,
 .home-toggle.active {
-  color: var(--go);
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #a7f3d0;
 }
 
 .airport-name {
   margin: 10px 0 2px;
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 750;
   line-height: 1.2;
   letter-spacing: -0.01em;
 }
@@ -748,21 +748,59 @@ button.chip:hover {
 .airport-place {
   margin: 0;
   color: var(--text-2);
-  font-size: var(--t-sm);
+  font-size: 14px;
 }
 
-.airport-facts {
+.airport-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 20px;
-  margin: 14px 0 0;
-  color: var(--text-2);
-  font-size: var(--t-sm);
+  gap: 7px;
+  margin-top: 14px;
 }
 
-.airport-facts strong {
+.airport-chips .chip {
+  gap: 5px;
+  padding: 4px 9px;
+  border-color: rgba(148, 178, 214, 0.24);
+  background: rgba(5, 11, 20, 0.55);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.airport-chips .chip-strong {
+  border-color: rgba(255, 90, 31, 0.45);
+  background: rgba(255, 90, 31, 0.14);
+  color: #ffd9c9;
+}
+
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.quick-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 9px;
+  border: 1px solid rgba(148, 178, 214, 0.24);
+  border-radius: 999px;
+  background: rgba(5, 11, 20, 0.55);
   color: var(--text);
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.quick-link:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.quick-link svg {
+  flex: 0 0 auto;
+  color: var(--accent);
 }
 
 .airport-clock {
@@ -776,7 +814,7 @@ button.chip:hover {
 
 .clock-zulu {
   font-family: var(--mono);
-  font-size: 34px;
+  font-size: 38px;
   font-weight: 700;
   line-height: 1;
 }
@@ -784,32 +822,58 @@ button.chip:hover {
 .clock-zulu::after {
   content: 'Z';
   margin-left: 2px;
-  color: var(--muted);
+  color: var(--brand);
 }
 
 .clock-local {
   color: var(--text-2);
-  font-size: var(--t-sm);
+  font-size: 14px;
+  font-weight: 600;
 }
 
+.clock-sun {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.clock-sun span,
 .clock-phase {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-  color: var(--text-2);
-  font-size: var(--t-sm);
+  gap: 4px;
 }
 
-.phase-day svg { color: var(--caution); }
-.phase-twilight svg { color: #fdba74; }
-.phase-night svg { color: #a5b4fc; }
+.clock-phase {
+  margin-top: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.phase-day {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fde68a;
+}
+
+.phase-twilight {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fdba74;
+}
+
+.phase-night {
+  background: rgba(129, 140, 248, 0.15);
+  color: #c7d2fe;
+}
 
 .photo-credit {
   position: absolute;
-  right: 14px;
+  right: 12px;
   bottom: 6px;
-  color: rgba(232, 239, 247, 0.4);
+  color: rgba(232, 239, 247, 0.45);
   font-size: 10px;
 }
 
@@ -2479,16 +2543,15 @@ details .raw-text {
 
   .airport-header {
     grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
     padding: 20px 18px 22px;
   }
 
   .airport-clock {
     flex-direction: row;
     flex-wrap: wrap;
-    align-items: baseline;
+    align-items: center;
     justify-content: flex-start;
-    gap: 4px 14px;
+    gap: 6px 14px;
     text-align: left;
   }
 
@@ -2496,12 +2559,12 @@ details .raw-text {
     font-size: 26px;
   }
 
-  .clock-phase {
+  .clock-sun {
     margin-top: 0;
   }
 
   .ident {
-    font-size: 30px;
+    font-size: 32px;
   }
 
   .airport-name {
