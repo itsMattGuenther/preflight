@@ -46,12 +46,26 @@ export function handler(fn) {
   };
 }
 
-export async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, ...options } = {}) {
-  return fetch(url, {
-    ...options,
-    headers: { 'User-Agent': USER_AGENT, ...headers },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+export async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, retries = 1, ...options } = {}) {
+  // One quick retry for fast failures (dropped connection, 5xx). Timeouts are
+  // not retried so a slow upstream cannot push a function past its time limit.
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        ...options,
+        headers: { 'User-Agent': USER_AGENT, ...headers },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.status >= 500 && attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        continue;
+      }
+      return res;
+    } catch (error) {
+      if (error.name === 'TimeoutError' || attempt >= retries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
 }
 
 export async function fetchJson(url, options = {}) {

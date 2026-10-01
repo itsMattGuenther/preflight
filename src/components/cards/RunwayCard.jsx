@@ -48,7 +48,7 @@ function RunwayDiagram({ runways, ranked, wind }) {
 
       {runways.map((runway) => {
         const [first, second] = runway.ends;
-        const length = 56 + 64 * ((runway.length_ft || longest * 0.5) / longest);
+        const length = 48 + 58 * ((runway.length_ft || longest * 0.5) / longest);
         const isBest = best && best.runway.id === runway.id;
         const eligible = ranked.some((item) => item.runway.id === runway.id && item.eligible);
         const heading = first.heading_true;

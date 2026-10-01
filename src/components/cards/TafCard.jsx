@@ -16,7 +16,8 @@ function conditionsText(period) {
   if (wx.length) parts.push(wx.map(describeWeatherGroup).join(', '));
   else if (period.wx === '' && period.change !== 'TEMPO' && period.change !== 'PROB') parts.push('No weather');
   if (period.clouds) {
-    parts.push(period.clouds.length ? period.clouds.map((layer) => `${layer.cover} ${formatFeet(layer.base_ft)}`).join(', ') : 'Sky clear');
+    const layers = period.clouds.filter((layer) => layer.base_ft != null && !['SKC', 'CLR', 'NSC'].includes(layer.cover));
+    parts.push(layers.length ? layers.map((layer) => `${layer.cover} ${formatFeet(layer.base_ft)}${layer.type ? ` ${layer.type}` : ''}`).join(', ') : 'Sky clear');
   }
   if (period.wind_shear) parts.push(`Wind shear at ${formatFeet(period.wind_shear.height_ft)}`);
   return parts.join(' · ');

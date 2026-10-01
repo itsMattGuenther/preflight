@@ -13,6 +13,7 @@ const browser = {
   fetch: 'readonly',
   navigator: 'readonly',
   process: 'readonly',
+  setTimeout: 'readonly',
   window: 'readonly',
 };
 

@@ -1,4 +1,4 @@
-import { getStore } from '@netlify/blobs';
+import { getDeployStore, getStore } from '@netlify/blobs';
 
 // Small read-through cache for slow or rate-limited upstream sources (AirNav
 // scraping, the national TFR list, winds aloft text, airport reference data).
@@ -13,8 +13,14 @@ const memory = new Map();
 const MAX_MEMORY_ENTRIES = 300;
 
 function store() {
+  // Production shares one site-wide cache. Deploy previews and branch deploys
+  // get a deploy-scoped store so preview code never writes into production's
+  // cache (Netlify's recommended isolation for global blob stores). Local dev
+  // uses the CLI's sandboxed store.
+  const context = globalThis.Netlify?.context?.deploy?.context;
   try {
-    return getStore({ name: STORE_NAME });
+    if (context === 'production' || !context || context === 'dev') return getStore({ name: STORE_NAME });
+    return getDeployStore({ name: STORE_NAME });
   } catch {
     return null;
   }
