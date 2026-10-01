@@ -1,6 +1,6 @@
 import { ShieldAlert } from 'lucide-react';
 import { cardinal, formatFeet, formatLocal, formatZulu, timeAgo } from '../../lib/format';
-import { Card, ErrorNote, LinkOut, Skeleton } from '../ui';
+import { Card, ErrorNote, LinkOut, Notice, Skeleton } from '../ui';
 
 function altitudeRange(base, top) {
   if (base == null && top == null) return null;
@@ -9,11 +9,14 @@ function altitudeRange(base, top) {
 }
 
 function TfrList({ tfrs, tz }) {
-  if (tfrs.isLoading) return <Skeleton lines={2} />;
+  if (tfrs.isPending) return <Skeleton lines={2} />;
   if (tfrs.isError) return <ErrorNote error={tfrs.error} what="TFRs" onRetry={tfrs.refetch} />;
   const list = (tfrs.data?.tfrs || []).filter((tfr) => tfr.distance_nm <= 50);
-  if (!list.length) return <p className="all-clear">No TFRs within 50 NM.</p>;
+  const staleNote = tfrs.data?.stale ? <Notice tone="warning">The FAA TFR feed isn&apos;t responding; this list may be out of date. Check tfr.faa.gov.</Notice> : null;
+  if (!list.length) return <>{staleNote}<p className="all-clear">No TFRs within 50 NM.</p></>;
   return (
+    <>
+    {staleNote}
     <ul className="hazard-list">
       {list.slice(0, 6).map((tfr) => (
         <li key={tfr.id} className={tfr.inside ? 'severe' : tfr.active && tfr.distance_nm <= 10 ? 'warn' : ''}>
@@ -33,18 +36,25 @@ function TfrList({ tfrs, tz }) {
         </li>
       ))}
     </ul>
+    </>
   );
 }
 
 function AdvisoryList({ advisories, tz }) {
-  if (advisories.isLoading) return <Skeleton lines={2} />;
+  if (advisories.isPending) return <Skeleton lines={2} />;
   if (advisories.isError) return <ErrorNote error={advisories.error} what="advisories" onRetry={advisories.refetch} />;
   const data = advisories.data || {};
   const items = [...(data.sigmets || []), ...(data.cwas || []), ...(data.gairmets || [])]
     .filter((item) => item.hazard !== 'TURB-HI')
     .sort((a, b) => a.distance_nm - b.distance_nm);
-  if (!items.length) return <p className="all-clear">No SIGMETs, AIRMETs or Center Weather Advisories within {data.radius_nm || 25} NM.</p>;
+  const missing = [...(data.unavailable || []), ...(data.stale || [])].filter((name) => name !== 'PIREPs');
+  const missingNote = missing.length ? <Notice tone="warning">{missing.join(', ')} unavailable right now. Check aviationweather.gov.</Notice> : null;
+  if (!items.length) {
+    return missing.length ? missingNote : <p className="all-clear">No SIGMETs, AIRMETs or Center Weather Advisories within {data.radius_nm || 25} NM.</p>;
+  }
   return (
+    <>
+    {missingNote}
     <ul className="hazard-list">
       {items.map((item, index) => (
         <li key={`${item.kind}-${item.hazard}-${index}`} className={item.over_field && item.kind?.includes('SIGMET') ? 'severe' : item.over_field ? 'warn' : ''}>
@@ -66,11 +76,12 @@ function AdvisoryList({ advisories, tz }) {
         </li>
       ))}
     </ul>
+    </>
   );
 }
 
 function PirepList({ advisories, now }) {
-  if (advisories.isLoading) return <Skeleton lines={2} />;
+  if (advisories.isPending) return <Skeleton lines={2} />;
   if (advisories.isError) return null;
   const pireps = advisories.data?.pireps || [];
   if (!pireps.length) return <p className="all-clear muted">No pilot reports below FL180 within {advisories.data?.pirep_radius_nm || 60} NM in the last 3 hours.</p>;

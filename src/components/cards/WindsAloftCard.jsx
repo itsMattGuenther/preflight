@@ -24,7 +24,7 @@ function Arrow({ dir }) {
 
 export function WindsAloftCard({ winds }) {
   const [index, setIndex] = useState(0);
-  if (winds.isLoading) return <Card title="Winds aloft" icon={Wind} className="area-aloft"><Skeleton lines={4} /></Card>;
+  if (winds.isPending) return <Card title="Winds aloft" icon={Wind} className="area-aloft"><Skeleton lines={4} /></Card>;
   if (winds.isError) return <Card title="Winds aloft" icon={Wind} className="area-aloft"><ErrorNote error={winds.error} what="winds aloft" onRetry={winds.refetch} /></Card>;
   const station = winds.data?.station;
   const forecasts = winds.data?.forecasts || [];

@@ -24,7 +24,7 @@ export function TrafficCard({ airport, traffic, now }) {
   const [hover, setHover] = useState(null);
   const config = RANGES.find((item) => item.value === range);
 
-  if (!airport || traffic.isLoading) return <Card title="Traffic (ADS-B)" icon={RadioTower} className="area-traffic"><Skeleton lines={6} /></Card>;
+  if (!airport || traffic.isPending) return <Card title="Traffic (ADS-B)" icon={RadioTower} className="area-traffic"><Skeleton lines={6} /></Card>;
   if (traffic.isError) return <Card title="Traffic (ADS-B)" icon={RadioTower} className="area-traffic"><ErrorNote error={traffic.error} what="ADS-B traffic" onRetry={traffic.refetch} /></Card>;
 
   const elevation = airport.elevation_ft || 0;

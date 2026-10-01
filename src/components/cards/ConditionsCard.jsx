@@ -40,7 +40,8 @@ function Metric({ label, value, sub, tone }) {
 }
 
 function cloudSummary(metar) {
-  if (!metar.clouds?.length || metar.clear) return 'Clear';
+  if (metar.clouds == null) return 'Sky not reported';
+  if (!metar.clouds.length || metar.clear) return 'Clear';
   return metar.clouds.map((layer) => `${layer.cover}${layer.base_ft != null ? String(Math.round(layer.base_ft / 100)).padStart(3, '0') : ''}${layer.type || ''}`).join(' ');
 }
 
@@ -50,7 +51,7 @@ export function ConditionsCard({ weather, airport, lastSeen, now }) {
   const metar = weather.data?.metar;
   const source = weather.data?.metar_source;
 
-  if (weather.isLoading) return <Card title="Current conditions" icon={Cloud} className="area-conditions"><Skeleton lines={6} /></Card>;
+  if (weather.isPending) return <Card title="Current conditions" icon={Cloud} className="area-conditions"><Skeleton lines={6} /></Card>;
   if (weather.isError) return <Card title="Current conditions" icon={Cloud} className="area-conditions"><ErrorNote error={weather.error} what="weather" onRetry={weather.refetch} /></Card>;
   if (!metar) {
     return (
@@ -89,7 +90,9 @@ export function ConditionsCard({ weather, airport, lastSeen, now }) {
             {formatWind(metar)}
           </div>
           <div className="conditions-sky">
-            {weatherGroups.length ? weatherGroups.map(describeWeatherGroup).join(', ') : metar.ceiling_ft ? `Ceiling ${formatFeet(metar.ceiling_ft)}` : 'No ceiling'}
+            {weatherGroups.length
+              ? weatherGroups.map(describeWeatherGroup).join(', ')
+              : metar.ceiling_ft != null ? `Ceiling ${formatFeet(metar.ceiling_ft)}` : metar.clouds == null ? 'Sky not reported' : 'No ceiling'}
             {' · '}
             {formatVisibility(metar.visibility_sm, metar.visibility_plus)}
           </div>
@@ -97,7 +100,12 @@ export function ConditionsCard({ weather, airport, lastSeen, now }) {
       </div>
 
       <div className="metric-grid">
-        <Metric label="Ceiling" value={metar.ceiling_ft ? formatFeet(metar.ceiling_ft) : 'None'} sub={cloudSummary(metar)} />
+        <Metric
+          label="Ceiling"
+          value={metar.ceiling_ft != null ? formatFeet(metar.ceiling_ft) : metar.clouds == null ? 'Unknown' : 'None'}
+          sub={cloudSummary(metar)}
+          tone={metar.clouds == null ? 'caution' : null}
+        />
         <Metric label="Visibility" value={formatVisibility(metar.visibility_sm, metar.visibility_plus)} sub={metar.wx || 'No weather'} />
         <Metric
           label="Wind"
@@ -146,7 +154,7 @@ export function ConditionsCard({ weather, airport, lastSeen, now }) {
                   <td><CategoryBadge category={item.flight_category} size="sm" /></td>
                   <td className="mono">{formatWindShort(item)}</td>
                   <td>{formatVisibility(item.visibility_sm)}</td>
-                  <td>{item.ceiling_ft ? `CIG ${formatFeet(item.ceiling_ft)}` : 'No CIG'}</td>
+                  <td>{item.ceiling_ft != null ? `CIG ${formatFeet(item.ceiling_ft)}` : 'No CIG'}</td>
                 </tr>
               ))}
             </tbody>

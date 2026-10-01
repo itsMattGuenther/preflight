@@ -22,6 +22,7 @@ const DURATION_OPTIONS = [
 export function MinimumsCard({ evaluation, flightWindow, onWindowChange, windowRange, minimums, isExample, onEdit, onCopyBriefing, timeZone, loading }) {
   const [copied, setCopied] = useState(false);
   const verdict = VERDICTS[evaluation?.verdict || 'unknown'];
+  const stillLoading = loading || (evaluation?.checks || []).some((item) => item.value === 'Loading…');
   const presetLabel = PRESETS[minimums.preset]?.label;
 
   async function copy() {
@@ -39,10 +40,10 @@ export function MinimumsCard({ evaluation, flightWindow, onWindowChange, windowR
       className="area-minimums minimums-card"
       action={<button type="button" className="text-button" onClick={onEdit}>Edit minimums</button>}
     >
-      <div className={`verdict verdict-${verdict.tone}`}>
-        <StatusIcon status={{ go: 'pass', caution: 'caution', nogo: 'fail', unknown: 'unknown' }[verdict.tone]} size={30} />
+      <div className={`verdict verdict-${stillLoading ? 'unknown' : verdict.tone}`}>
+        <StatusIcon status={stillLoading ? 'unknown' : { go: 'pass', caution: 'caution', nogo: 'fail', unknown: 'unknown' }[verdict.tone]} size={30} />
         <div>
-          <div className="verdict-label">{loading ? 'Checking conditions…' : verdict.label}</div>
+          <div className="verdict-label">{stillLoading ? 'Checking conditions…' : verdict.label}</div>
           <div className="verdict-sub">
             {windowRange
               ? `${evaluation?.futureOnly ? 'Departing' : 'Flying'} ${formatLocal(windowRange.startMs, timeZone)}–${formatLocal(windowRange.endMs, timeZone)} ${zoneAbbreviation(timeZone)} (${formatZulu(windowRange.startMs)}–${formatZulu(windowRange.endMs)})`

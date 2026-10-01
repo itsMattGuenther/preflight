@@ -116,7 +116,7 @@ export default function App() {
   );
 
   const evaluation = useMemo(() => {
-    if (!airport || weather.isLoading) return null;
+    if (!airport || weather.isPending) return null;
     return evaluateMinimums({
       minimums,
       airport,
@@ -125,14 +125,15 @@ export default function App() {
       taf: weather.data?.taf,
       sun: sunForFlight,
       // undefined = still loading, null = feed failed.
-      tfrs: tfrs.isLoading ? undefined : tfrs.isError ? null : tfrs.data?.tfrs,
-      advisories: advisories.isLoading ? undefined : advisories.isError ? null : advisories.data,
+      tfrs: tfrs.isPending ? undefined : tfrs.isError ? null : tfrs.data?.tfrs,
+      tfrsStale: Boolean(tfrs.data?.stale),
+      advisories: advisories.isPending ? undefined : advisories.isError ? null : advisories.data,
       notams: notams.data || (notams.isError ? { configured: false } : null),
       window: windowRange,
       now,
       formatTime: (value) => formatLocal(value, tz),
     });
-  }, [airport, weather.isLoading, weather.data, minimums, sunForFlight, tfrs.data, tfrs.isError, tfrs.isLoading, advisories.data, advisories.isError, advisories.isLoading, notams.data, notams.isError, windowRange, now, tz]);
+  }, [airport, weather.isPending, weather.data, minimums, sunForFlight, tfrs.data, tfrs.isError, tfrs.isPending, advisories.data, advisories.isError, advisories.isPending, notams.data, notams.isError, windowRange, now, tz]);
 
   const copyBriefing = useCallback(async () => {
     try {
@@ -208,7 +209,7 @@ export default function App() {
               <RadarCard airport={airport} radar={radar} />
               <TrafficCard airport={airport} traffic={traffic} now={now} />
               <AirportInfoCard airport={airport} />
-              <NearbyCard nearby={airportQuery.data?.nearby} loading={airportQuery.isLoading} onSelect={selectAirport} />
+              <NearbyCard nearby={airportQuery.data?.nearby} loading={airportQuery.isPending} onSelect={selectAirport} />
               <DaylightCard airport={airport} sun={sunToday} now={now} />
               <WindsAloftCard winds={winds} />
               <FuelCard fuel={fuel} />

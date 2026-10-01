@@ -70,10 +70,11 @@ function limitStatus(value, limit, type, marginPct) {
   return 'pass';
 }
 
-// TEMPO/PROB groups describe temporary or possible conditions, so a breach
-// there is a caution (with the reason spelled out), not an outright fail.
+// TEMPO conditions are forecast to occur (briefly), so a TEMPO breach is a
+// real breach. PROB groups are only possible, so a PROB breach is a caution
+// with the reason spelled out.
 function softenFor(kind, status) {
-  if ((kind === 'temporary' || kind === 'possible') && status === 'fail') return 'caution';
+  if (kind === 'possible' && status === 'fail') return 'caution';
   return status;
 }
 
@@ -132,6 +133,7 @@ export function evaluateMinimums({
   taf,
   sun,
   tfrs,
+  tfrsStale = false,
   advisories,
   notams,
   window,
@@ -276,12 +278,18 @@ export function evaluateMinimums({
       }
       checks.push({ ...check('daylight', 'Daylight', 'Day only'), status, value: status === 'pass' ? 'Daytime' : status === 'caution' ? 'Close to sunset' : 'Outside daylight', note });
     } else {
-      const night = sun.civil_dusk && endMs > sun.civil_dusk.getTime();
+      const nightAfter = sun.civil_dusk && endMs > sun.civil_dusk.getTime();
+      const nightBefore = sun.civil_dawn && startMs < sun.civil_dawn.getTime();
+      const lightsNeeded = startMs < sunrise || endMs > sunset;
+      let note = `Sunset ${formatTime(sun.sunset)}`;
+      if (nightAfter) note = `Night (14 CFR 1.1) begins ${formatTime(sun.civil_dusk)}; position lights from sunset ${formatTime(sun.sunset)}`;
+      else if (nightBefore) note = `Night until civil twilight begins ${formatTime(sun.civil_dawn)}; position lights until sunrise ${formatTime(sun.sunrise)}`;
+      else if (lightsNeeded) note = `Position lights required between sunset and sunrise (${formatTime(sun.sunset)} / ${formatTime(sun.sunrise)})`;
       checks.push({
         ...check('daylight', 'Daylight', 'Day or night'),
         status: 'info',
-        value: night ? 'Includes night' : 'Daytime',
-        note: night ? `Night (14 CFR 1.1) begins ${formatTime(sun.civil_dusk)}; position lights from sunset ${formatTime(sun.sunset)}` : `Sunset ${formatTime(sun.sunset)}`,
+        value: nightAfter || nightBefore ? 'Includes night' : lightsNeeded ? 'Includes twilight' : 'Daytime',
+        note,
       });
     }
   }
@@ -289,18 +297,31 @@ export function evaluateMinimums({
   // TFRs (undefined while loading, null if the feed failed).
   if (tfrs === undefined) {
     checks.push({ ...check('tfr', 'TFRs', 'None within 10 NM'), status: 'unknown', value: 'Loading…' });
+  } else if (tfrs && tfrsStale) {
+    checks.push({ ...check('tfr', 'TFRs', 'None within 10 NM'), status: 'unknown', value: 'Feed out of date', note: 'The FAA TFR feed did not respond; check tfr.faa.gov' });
   } else if (tfrs) {
+    // "In effect during the flight" uses the TFR's own times against the
+    // flight window, so a TFR that starts mid-flight counts. Unknown times
+    // (detail record unavailable) are treated as possibly in effect.
+    const duringFlight = (tfr) => {
+      if (tfr.active === true) return true;
+      if (tfr.active == null && !tfr.effective_utc) return null;
+      const from = tfr.effective_utc ? Date.parse(tfr.effective_utc) : -Infinity;
+      const to = tfr.expire_utc ? Date.parse(tfr.expire_utc) : Infinity;
+      return from < endMs && to > startMs;
+    };
     const relevant = tfrs.filter((tfr) => tfr.distance_nm <= 10);
-    const blocking = relevant.find((tfr) => tfr.inside && tfr.active !== false);
-    const nearbyActive = relevant.find((tfr) => tfr.active);
-    const upcoming = relevant.find((tfr) => tfr.active === false && tfr.effective_utc && Date.parse(tfr.effective_utc) < endMs);
+    const base = check('tfr', 'TFRs', 'None within 10 NM');
+    const blocking = relevant.find((tfr) => tfr.inside && duringFlight(tfr) !== false);
+    const near = relevant.find((tfr) => duringFlight(tfr) !== false);
     if (blocking) {
-      checks.push({ ...check('tfr', 'TFRs', 'None within 10 NM'), status: 'fail', value: `Inside ${blocking.type} TFR`, note: blocking.title });
-    } else if (nearbyActive || upcoming) {
-      const tfr = nearbyActive || upcoming;
-      checks.push({ ...check('tfr', 'TFRs', 'None within 10 NM'), status: 'caution', value: `${tfr.type} TFR ${tfr.distance_nm} NM away`, note: tfr.title });
+      const certain = duringFlight(blocking) === true;
+      checks.push({ ...base, status: 'fail', value: `Inside ${blocking.type} TFR`, note: `${blocking.title}${certain ? '' : ' (times unknown: check tfr.faa.gov)'}` });
+    } else if (near) {
+      const timesKnown = duringFlight(near) === true;
+      checks.push({ ...base, status: 'caution', value: `${near.type} TFR ${near.distance_nm} NM away`, note: `${near.title}${timesKnown ? '' : ' (times unknown)'}` });
     } else {
-      checks.push({ ...check('tfr', 'TFRs', 'None within 10 NM'), value: 'None active within 10 NM' });
+      checks.push({ ...base, value: relevant.length ? 'None in effect during your flight' : 'None within 10 NM' });
     }
   } else {
     notChecked.push('TFRs: feed unavailable, check tfr.faa.gov');
@@ -310,6 +331,7 @@ export function evaluateMinimums({
   if (advisories === undefined) {
     checks.push({ ...check('advisories', 'SIGMETs / AIRMETs', 'None over field'), status: 'unknown', value: 'Loading…' });
   } else if (advisories) {
+    const missing = [...(advisories.unavailable || []), ...(advisories.stale || [])].filter((name) => name !== 'PIREPs');
     const over = [...(advisories.sigmets || []), ...(advisories.cwas || []), ...(advisories.gairmets || [])].filter((item) => item.over_field);
     const relevant = over.filter((item) => item.hazard !== 'TURB-HI');
     const severe = relevant.find((item) => item.kind?.includes('SIGMET') || (item.kind === 'Center Weather Advisory' && /TS/.test(item.hazard || '')));
@@ -323,6 +345,8 @@ export function evaluateMinimums({
       checks.push({ ...base, status: 'fail', value: `${severe.kind} in effect`, note: severe.hazard });
     } else if (cautions.length) {
       checks.push({ ...base, status: 'caution', value: label(cautions), note: 'AIRMET-level hazard forecast over the airport' });
+    } else if (missing.length) {
+      checks.push({ ...base, status: 'unknown', value: `${missing.join(', ')} unavailable`, note: 'Check aviationweather.gov before flight' });
     } else if (relevant.length) {
       checks.push({ ...base, status: 'info', value: label(relevant), note: 'Forecast over the area; matters most if you leave the pattern' });
     } else {
@@ -337,9 +361,16 @@ export function evaluateMinimums({
     notChecked.push('NOTAMs: not available in Preflight, check the FAA NOTAM Search');
   } else {
     const closures = (notams.notams || []).filter((notam) => classifyNotam(notam) === 'closure' && isActiveDuring(notam, startMs, endMs));
-    checks.push(closures.length
-      ? { ...check('notams', 'Closure NOTAMs', 'None'), status: 'caution', value: `${closures.length} closure NOTAM${closures.length > 1 ? 's' : ''}`, note: closures[0].text.slice(0, 120) }
-      : { ...check('notams', 'Closure NOTAMs', 'None'), value: 'None during window', note: 'Still read every NOTAM before flight' });
+    const airportClosed = closures.find((notam) => /\b(AD|AP)\b[^.]*\bCLSD\b|\bAIRPORT CLOSED\b/.test(String(notam.text).toUpperCase()));
+    const base = check('notams', 'Closure NOTAMs', 'None');
+    if (airportClosed) {
+      checks.push({ ...base, status: 'fail', value: 'Airport closure NOTAM', note: airportClosed.text.slice(0, 140) });
+    } else if (closures.length) {
+      checks.push({ ...base, status: 'caution', value: `${closures.length} runway closure NOTAM${closures.length > 1 ? 's' : ''}`, note: closures[0].text.slice(0, 140) });
+    } else {
+      checks.push({ ...base, value: 'None during window', note: 'Still read every NOTAM before flight' });
+    }
+    if (notams.stale) notChecked.push('NOTAMs: FAA feed did not respond; showing an older copy');
   }
 
   // Observation freshness and source.
@@ -356,12 +387,17 @@ export function evaluateMinimums({
     });
   }
 
+  // A check that could not be made is never treated as a pass: if any core
+  // input is unknown the verdict is "can't fully check" (unless something
+  // already fails, which is decisive on its own).
+  const CORE = ['ceiling', 'visibility', 'wind', 'gust', 'crosswind', 'runway', 'weather', 'tfr', 'advisories'];
   const statuses = checks.map((item) => item.status);
-  const coreUnknown = checks.filter((item) => ['ceiling', 'visibility', 'wind'].includes(item.id) && item.status === 'unknown').length >= 2;
+  const coreUnknown = checks.some((item) => CORE.includes(item.id) && item.status === 'unknown')
+    || (runways.length > 0 && eligible.length > 0 && !checks.some((item) => item.id === 'crosswind'));
   let verdict = 'within';
   if (statuses.includes('fail')) verdict = 'outside';
-  else if (statuses.includes('caution')) verdict = 'near';
   else if (coreUnknown) verdict = 'unknown';
+  else if (statuses.includes('caution')) verdict = 'near';
 
   return { verdict, checks, notChecked, futureOnly };
 }
@@ -370,5 +406,5 @@ export const VERDICTS = {
   within: { label: 'Within your minimums', short: 'Within minimums', tone: 'go' },
   near: { label: 'Close to your limits', short: 'Near limits', tone: 'caution' },
   outside: { label: 'Outside your minimums', short: 'Outside minimums', tone: 'nogo' },
-  unknown: { label: 'Not enough data', short: 'Unknown', tone: 'unknown' },
+  unknown: { label: "Can't fully check", short: 'Incomplete', tone: 'unknown' },
 };

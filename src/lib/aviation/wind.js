@@ -43,6 +43,11 @@ export function runwayWinds(runways, wind, { pavedOnly = false, minLengthFt = 0 
   const gust = wind?.wind_gust_kt ?? null;
   const variable = Boolean(wind?.wind_vrb) || (wind?.wind_dir_deg == null && speed > 0);
   const calm = wind?.wind_calm || speed === 0;
+  // "27015G25KT 220V320": the wind can come from anywhere in that arc, so
+  // the worst crosswind/tailwind across the arc is what counts.
+  const arc = !variable && wind?.wind_var_from_deg != null && wind?.wind_var_to_deg != null
+    ? directionsBetween(wind.wind_var_from_deg, wind.wind_var_to_deg)
+    : null;
 
   const ends = (runways || []).flatMap((runway) => (runway.ends || []).map((end) => {
     const eligible = (!pavedOnly || runway.paved !== false) && (!minLengthFt || !runway.length_ft || runway.length_ft >= minLengthFt);
@@ -58,8 +63,15 @@ export function runwayWinds(runways, wind, { pavedOnly = false, minLengthFt = 0 
       steady = windComponents(wind?.wind_dir_deg, speed, end.heading_true);
       gusting = gust ? windComponents(wind?.wind_dir_deg, gust, end.heading_true) : null;
     }
-    const worstCrosswind = Math.max(steady.crosswind ?? 0, gusting?.crosswind ?? 0);
-    const worstTailwind = Math.max(0, -(steady.headwind ?? 0), -(gusting?.headwind ?? 0));
+    let worstCrosswind = Math.max(steady.crosswind ?? 0, gusting?.crosswind ?? 0);
+    let worstTailwind = Math.max(0, -(steady.headwind ?? 0), -(gusting?.headwind ?? 0));
+    if (arc) {
+      for (const dir of arc) {
+        const sample = windComponents(dir, gust ?? speed, end.heading_true);
+        worstCrosswind = Math.max(worstCrosswind, sample.crosswind);
+        worstTailwind = Math.max(worstTailwind, -sample.headwind);
+      }
+    }
     return {
       runway,
       end,
@@ -79,6 +91,15 @@ export function runwayWinds(runways, wind, { pavedOnly = false, minLengthFt = 0 
     || Number(b.runway.paved === true) - Number(a.runway.paved === true)
     || (b.runway.length_ft || 0) - (a.runway.length_ft || 0)
     || String(a.id).localeCompare(String(b.id)));
+}
+
+function directionsBetween(from, to) {
+  // Clockwise arc from `from` to `to`, sampled every 5 degrees.
+  const span = (((to - from) % 360) + 360) % 360;
+  const list = [];
+  for (let offset = 0; offset <= span; offset += 5) list.push((from + offset) % 360);
+  list.push(to);
+  return list;
 }
 
 export function bestRunway(runways, wind, options) {

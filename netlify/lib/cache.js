@@ -49,28 +49,41 @@ function remember(key, entry) {
 
 /**
  * Returns { value, cached_utc, stale } for `key`, calling `load()` only when
- * no entry younger than `ttlMs` exists.
+ * no entry younger than its TTL exists.
+ *
+ * - `maxStaleMs`: if the upstream fails, a cached copy up to this old is
+ *   served with `stale: true`; anything older is treated as missing (a
+ *   week-old TFR list must never be presented as current).
+ * - `load` may return `{ [TTL_OVERRIDE]: ms, value }` to cache a degraded
+ *   result for less time than normal.
  */
-export async function cached(key, ttlMs, load) {
+export const TTL_OVERRIDE = Symbol('ttl');
+
+export async function cached(key, ttlMs, load, { maxStaleMs = 24 * 60 * 60 * 1000 } = {}) {
   const now = Date.now();
+  const ttlOf = (item) => item.ttl_ms ?? ttlMs;
   let entry = memory.get(key) || null;
-  if (!entry || now - entry.stored_at > ttlMs) {
+  if (!entry || now - entry.stored_at > ttlOf(entry)) {
     const fromBlob = await readBlob(key);
     if (fromBlob && (!entry || fromBlob.stored_at > entry.stored_at)) entry = fromBlob;
   }
-  if (entry && now - entry.stored_at <= ttlMs) {
+  if (entry && now - entry.stored_at <= ttlOf(entry)) {
     remember(key, entry);
     return { value: entry.value, cached_utc: new Date(entry.stored_at).toISOString(), stale: false };
   }
 
   try {
-    const value = await load();
-    const fresh = { stored_at: now, value };
+    const loaded = await load();
+    const override = loaded && typeof loaded === 'object' && TTL_OVERRIDE in loaded;
+    const value = override ? loaded.value : loaded;
+    const fresh = { stored_at: now, value, ...(override ? { ttl_ms: loaded[TTL_OVERRIDE] } : {}) };
     remember(key, fresh);
     await writeBlob(key, fresh);
     return { value, cached_utc: new Date(now).toISOString(), stale: false };
   } catch (error) {
-    if (entry) return { value: entry.value, cached_utc: new Date(entry.stored_at).toISOString(), stale: true, error: error.message };
+    if (entry && now - entry.stored_at <= maxStaleMs) {
+      return { value: entry.value, cached_utc: new Date(entry.stored_at).toISOString(), stale: true, error: error.message };
+    }
     throw error;
   }
 }

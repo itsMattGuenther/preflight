@@ -1,7 +1,7 @@
 import { CalendarClock } from 'lucide-react';
 import { useState } from 'react';
 import { describeWeatherGroup, parseWeather } from '../../lib/aviation/metar';
-import { tafSlots } from '../../lib/aviation/taf';
+import { applyOverlay, basePeriodAt, tafSlots } from '../../lib/aviation/taf';
 import { cardinal, formatFeet, formatLocal, formatVisibility, formatWindShort, formatZulu, timeAgo } from '../../lib/format';
 import { CategoryBadge, Card, ErrorNote, Notice, Segmented, Skeleton } from '../ui';
 
@@ -23,6 +23,15 @@ function conditionsText(period) {
   return parts.join(' · ');
 }
 
+// A TEMPO/PROB group lists only what changes, so its category must be worked
+// out against the base group it modifies (e.g. TEMPO P6SM over OVC004 is
+// still LIFR because the ceiling is unchanged).
+function displayCategory(taf, period) {
+  if (!['TEMPO', 'PROB'].includes(period.change)) return period.flight_category;
+  const base = basePeriodAt(taf, Date.parse(period.from_utc) + 1000);
+  return base ? applyOverlay(base, period).flight_category : period.flight_category;
+}
+
 function changeLabel(period, tz) {
   const from = `${formatLocal(period.from_utc, tz, 'EEE h a')} (${formatZulu(period.from_utc)})`;
   const to = formatLocal(period.to_utc, tz, 'h a');
@@ -42,7 +51,7 @@ export function TafCard({ weather, airport, windowRange, now }) {
   const taf = weather.data?.taf;
   const source = weather.data?.taf_source;
 
-  if (weather.isLoading) return <Card title="Forecast (TAF)" icon={CalendarClock} className="area-taf"><Skeleton lines={4} /></Card>;
+  if (weather.isPending) return <Card title="Forecast (TAF)" icon={CalendarClock} className="area-taf"><Skeleton lines={4} /></Card>;
   if (weather.isError) return <Card title="Forecast (TAF)" icon={CalendarClock} className="area-taf"><ErrorNote error={weather.error} what="the forecast" onRetry={weather.refetch} /></Card>;
   if (!taf) {
     return (
@@ -117,7 +126,7 @@ export function TafCard({ weather, airport, windowRange, now }) {
               <li key={`${period.change}-${period.from_utc}-${period.probability}`} className={['TEMPO', 'PROB'].includes(period.change) ? 'overlay' : ''}>
                 <div className="taf-period-head">
                   <span>{changeLabel(period, tz)}</span>
-                  <CategoryBadge category={period.flight_category} size="sm" />
+                  <CategoryBadge category={displayCategory(taf, period)} size="sm" />
                 </div>
                 <div className="taf-period-body">{conditionsText(period)}</div>
               </li>

@@ -50,7 +50,7 @@ export function describeChanges(previous, current) {
   if (windChanged) changes.push({ label: `Wind ${formatWindShort(previous)} → ${formatWindShort(current)}`, important: (current.wind_speed_kt ?? 0) > (previous.wind_speed_kt ?? 0) });
   if (previous.ceiling_ft !== current.ceiling_ft && Math.abs((previous.ceiling_ft ?? 99999) - (current.ceiling_ft ?? 99999)) >= 500) {
     changes.push({
-      label: `Ceiling ${previous.ceiling_ft ? formatFeet(previous.ceiling_ft) : 'none'} → ${current.ceiling_ft ? formatFeet(current.ceiling_ft) : 'none'}`,
+      label: `Ceiling ${previous.ceiling_ft != null ? formatFeet(previous.ceiling_ft) : 'none'} → ${current.ceiling_ft != null ? formatFeet(current.ceiling_ft) : 'none'}`,
       important: (current.ceiling_ft ?? 99999) < (previous.ceiling_ft ?? 99999),
     });
   }

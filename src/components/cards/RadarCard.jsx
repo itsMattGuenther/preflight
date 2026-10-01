@@ -40,7 +40,7 @@ export function RadarCard({ airport, radar }) {
       title="Precipitation radar"
       icon={Radar}
       className="area-radar"
-      meta={frame ? `${formatZulu(frame.time_utc)} · ${formatLocal(frame.time_utc, tz)}` : radar.isLoading ? 'Loading' : 'Unavailable'}
+      meta={frame ? `${formatZulu(frame.time_utc)} · ${formatLocal(frame.time_utc, tz)}` : radar.isPending ? 'Loading' : 'Unavailable'}
       action={frames.length > 1 ? (
         <button type="button" className="icon-button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause radar loop' : 'Play radar loop'}>
           {playing ? <Pause size={15} /> : <Play size={15} />}

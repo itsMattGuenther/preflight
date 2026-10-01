@@ -17,8 +17,10 @@ const PHENOMENA = {
   PO: 'dust whirls', SQ: 'squalls', FC: 'funnel cloud', SS: 'sandstorm', DS: 'duststorm',
 };
 const COVER = {
-  SKC: 'clear', CLR: 'clear', NSC: 'no significant clouds', FEW: 'few', SCT: 'scattered', BKN: 'broken', OVC: 'overcast', VV: 'sky obscured, vertical visibility',
+  SKC: 'clear', CLR: 'clear', NSC: 'no significant clouds', NCD: 'no clouds detected', FEW: 'few', SCT: 'scattered', BKN: 'broken', OVC: 'overcast',
+  VV: 'sky obscured, vertical visibility', OVX: 'sky obscured, vertical visibility',
 };
+const CEILING_COVERS = ['BKN', 'OVC', 'VV', 'OVX'];
 
 export function parseWeatherGroup(token) {
   let rest = String(token || '').trim().toUpperCase();
@@ -78,7 +80,7 @@ export function describeWeatherGroup(group) {
  * Hazards a training/VFR flight should not take lightly. 'fail' items are
  * outside any reasonable personal minimum; 'caution' items need a closer look.
  */
-export function weatherHazards({ wx, clouds, raw, remarks } = {}) {
+export function weatherHazards({ wx, clouds, raw, remarks, wind_shear: windShear } = {}) {
   const hazards = [];
   const add = (level, label, code) => {
     if (!hazards.some((item) => item.label === label)) hazards.push({ level, label, code });
@@ -96,6 +98,7 @@ export function weatherHazards({ wx, clouds, raw, remarks } = {}) {
     if (has('VA')) add('fail', 'Volcanic ash', group.token);
     if (has('SN') || has('SG')) add(group.intensity === 'heavy' ? 'fail' : 'caution', group.intensity === 'heavy' ? 'Heavy snow' : 'Snow', group.token);
     if (has('IC')) add('caution', 'Ice crystals', group.token);
+    if (has('UP')) add(group.descriptors.includes('FZ') ? 'fail' : 'caution', group.descriptors.includes('FZ') ? 'Freezing precipitation (icing)' : 'Unknown precipitation', group.token);
     if (group.descriptors.includes('FZ') && has('FG')) add('caution', 'Freezing fog', group.token);
     if ((has('RA') || has('DZ')) && !group.descriptors.includes('TS') && !group.descriptors.includes('FZ')) {
       add(group.intensity === 'heavy' ? 'fail' : 'caution', group.intensity === 'heavy' ? 'Heavy rain' : 'Rain', group.token);
@@ -116,15 +119,17 @@ export function weatherHazards({ wx, clouds, raw, remarks } = {}) {
   if (/\bLTG/.test(remarkText)) add('caution', 'Lightning observed', 'LTG');
   if (/\bCB\b/.test(remarkText)) add('caution', 'Cumulonimbus reported in remarks', 'CB');
   if (/\bWS\b|\bWND SHEAR|\bLLWS\b/.test(remarkText) || /\bWS\d{3}\//.test(String(raw || ''))) add('caution', 'Wind shear reported', 'WS');
+  if (windShear) add('caution', 'Low-level wind shear forecast', 'WS');
 
   return hazards;
 }
 
 function cloudSentence(clouds, ceilingFt) {
-  if (!clouds?.length || clouds.every((layer) => ['CLR', 'SKC', 'NSC'].includes(layer.cover))) return 'Sky clear below 12,000 ft.';
+  if (clouds == null) return 'Sky condition not reported (the station\'s cloud sensor may be out). Treat the ceiling as unknown.';
+  if (!clouds.length || clouds.every((layer) => ['CLR', 'SKC', 'NSC', 'NCD'].includes(layer.cover))) return 'Sky clear below 12,000 ft.';
   const parts = clouds.map((layer) => {
     const type = layer.type === 'CB' ? ' cumulonimbus' : layer.type === 'TCU' ? ' towering cumulus' : '';
-    const isCeiling = layer.base_ft === ceilingFt && ['BKN', 'OVC', 'VV'].includes(layer.cover);
+    const isCeiling = layer.base_ft === ceilingFt && CEILING_COVERS.includes(layer.cover);
     return `${COVER[layer.cover] || layer.cover}${type} at ${formatFeet(layer.base_ft)}${isCeiling ? ' (ceiling)' : ''}`;
   });
   return `Clouds: ${parts.join(', ')}.`;

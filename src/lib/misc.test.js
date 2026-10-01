@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { describeChanges } from '../hooks/useLastSeen.js';
-import { tafSlots, tafConditionsInWindow } from './aviation/taf.js';
+import { applyOverlay, tafSlots, tafConditionsInWindow } from './aviation/taf.js';
 import { buildBriefing } from './briefing.js';
 import { formatVisibility, formatWind } from './format.js';
 
@@ -75,3 +75,12 @@ describe('buildBriefing', () => {
     expect(text).toContain('Not checked: NOTAMs');
   });
 });
+
+describe('applyOverlay', () => {
+  it('keeps the base ceiling when a TEMPO group changes only visibility', () => {
+    const base = { change: 'BASE', visibility_sm: 4, clouds: [{ cover: 'OVC', base_ft: 400 }], ceiling_ft: 400, wx: 'BR', wind_dir_deg: 180, wind_speed_kt: 5 };
+    const tempo = { change: 'TEMPO', visibility_sm: 6, visibility_plus: true, clouds: null, wx: '', wind_speed_kt: null };
+    expect(applyOverlay(base, tempo).flight_category).toBe('LIFR');
+  });
+});
+

@@ -17,7 +17,7 @@ export function NotamCard({ airport, notams, now }) {
   );
 
   let body;
-  if (notams.isLoading) body = <Skeleton lines={3} />;
+  if (notams.isPending) body = <Skeleton lines={3} />;
   else if (notams.isError) body = <><ErrorNote error={notams.error} what="NOTAMs" onRetry={notams.refetch} />{links}</>;
   else if (notams.data?.configured === false) {
     body = (

@@ -52,7 +52,7 @@ export default handler(async (req) => {
     return json({ configured: false, fetched_utc: new Date().toISOString(), notams: [] });
   }
 
-  const { value, cached_utc, stale, error } = await cached(`notams/v2/${icao}`, 10 * 60 * 1000, () => loadNotams(icao, clientId, clientSecret));
+  const { value, cached_utc, stale, error } = await cached(`notams/v2/${icao}`, 10 * 60 * 1000, () => loadNotams(icao, clientId, clientSecret), { maxStaleMs: 2 * 60 * 60 * 1000 });
   return json({
     configured: true,
     fetched_utc: cached_utc,

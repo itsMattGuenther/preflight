@@ -23,6 +23,8 @@ describe('weatherHazards', () => {
     ['GR', 'fail:Hail'],
     ['FZFG', 'caution:Freezing fog'],
     ['FG', 'caution:Fog'],
+    ['-FZUP', 'fail:Freezing precipitation (icing)'],
+    ['UP', 'caution:Unknown precipitation'],
   ])('%s -> %s', (wx, expected) => {
     expect(levels({ wx })).toContain(expected);
   });
@@ -63,5 +65,15 @@ describe('plainEnglishMetar', () => {
     expect(text).toContain('broken at 5,500 ft (ceiling)');
     expect(text).toContain('fog or low clouds can form');
     expect(text).toContain('Altimeter setting 29.90');
+  });
+
+  it('says when the sky condition is not reported', () => {
+    const lines = plainEnglishMetar({ wind_dir_deg: 350, wind_speed_kt: 10, visibility_sm: 3, wx: '-RA BR', clouds: null, ceiling_ft: null });
+    expect(lines.join(' ')).toContain('Sky condition not reported');
+  });
+
+  it('labels vertical visibility reported as OVX as the ceiling', () => {
+    const lines = plainEnglishMetar({ wind_calm: true, wind_speed_kt: 0, visibility_sm: 0.25, wx: 'FG', clouds: [{ cover: 'OVX', base_ft: 200 }], ceiling_ft: 200 });
+    expect(lines.join(' ')).toContain('vertical visibility at 200 ft (ceiling)');
   });
 });

@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { nearArea } from '../functions/advisories.js';
+import { cached } from './cache.js';
 import { endsFromIds, parseAwcFrequencies, parseMagVar, runwaysFromAwc, surfaceInfo, titleCaseName } from './airportData.js';
 import { distanceToPolygonNm, pointInRing } from './geo.js';
 import { decodeWindGroup, parseFdText } from './windsAloft.js';
@@ -144,5 +146,46 @@ describe('tfr detail', () => {
   it('reads UTC effective times and the highest ceiling', () => {
     const xml = '<dateEffective>2026-10-03T12:00:00</dateEffective><dateExpire>2026-10-03T23:00:00</dateExpire><codeDistVerUpper>ALT</codeDistVerUpper><valDistVerUpper>17999</valDistVerUpper><uomDistVerUpper>FT</uomDistVerUpper>';
     expect(parseDetail(xml)).toEqual({ effective_utc: '2026-10-03T12:00:00.000Z', expire_utc: '2026-10-03T23:00:00.000Z', top_ft: 17999, top_unlimited: false });
+  });
+});
+
+describe('review regressions (server)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('treats a METAR with no sky group as unknown sky, not clear', () => {
+    const metar = normalizeMetar({
+      icaoId: 'KIRK', rawOb: 'SPECI KIRK 011955Z AUTO 35010KT 3SM -RA BR 18/17 A2990 RMK AO2 $',
+      reportTime: '2026-10-01T19:55:00.000Z', wdir: 350, wspd: 10, visib: 3, wxString: '-RA BR', clouds: null, fltCat: null, temp: 18, dewp: 17,
+    });
+    expect(metar.clouds).toBeNull();
+    expect(metar.ceiling_ft).toBeNull();
+    expect(metar.flight_category).toBeNull();
+    expect(metar.clear).toBe(false);
+  });
+
+  it('still reads CLR as clear', () => {
+    const metar = normalizeMetar({ icaoId: 'KXYZ', rawOb: 'METAR KXYZ 011953Z 18005KT 10SM CLR 20/10 A3001', clouds: [{ cover: 'CLR' }], visib: '10+', wdir: 180, wspd: 5 });
+    expect(metar.clear).toBe(true);
+    expect(metar.flight_category).toBe('VFR');
+  });
+
+  it('serves a stale cached value only within maxStaleMs', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+    const key = `test/${Math.random()}`;
+    await cached(key, 1000, async () => 'fresh');
+    vi.setSystemTime(new Date('2026-10-01T12:10:00Z'));
+    const stale = await cached(key, 1000, async () => { throw new Error('down'); }, { maxStaleMs: 60 * 60 * 1000 });
+    expect(stale).toMatchObject({ value: 'fresh', stale: true });
+    vi.setSystemTime(new Date('2026-10-01T14:00:00Z'));
+    await expect(cached(key, 1000, async () => { throw new Error('down'); }, { maxStaleMs: 60 * 60 * 1000 })).rejects.toThrow('down');
+  });
+
+  it('treats line and point advisories as corridors', () => {
+    const center = { lat: 36, lon: -94 };
+    // A two-point line passing 5 NM north of the field is "over the field".
+    expect(nearArea(center, [{ lat: 36.0833, lon: -95 }, { lat: 36.0833, lon: -93 }])).toBe(0);
+    // An isolated cell 40 NM away is not.
+    expect(nearArea(center, [{ lat: 36.6667, lon: -94 }])).toBeNull();
   });
 });

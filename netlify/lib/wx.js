@@ -80,15 +80,20 @@ function windFrom(source, raw) {
   };
 }
 
+const SKY_GROUP = /(?:^|\s)(?:CLR|SKC|NSC|NCD|CAVOK|(?:FEW|SCT|BKN|OVC)(?:\d{3}|\/\/\/)|VV(?:\d{3}|\/\/\/))(?=\s|CB|TCU|$)/;
+
 export function normalizeMetar(metar) {
   if (!metar) return null;
   const raw = metar.rawOb || '';
-  const layers = cloudLayers(metar.clouds, raw);
-  const visibility = parseVisibility(metar.visib);
-  const vertVis = toNumber(metar.vertVis);
-  const ceiling = ceilingFrom(layers, vertVis);
   const remarks = raw.includes(' RMK ') ? raw.slice(raw.indexOf(' RMK ') + 5) : '';
   const body = raw.includes(' RMK ') ? raw.slice(0, raw.indexOf(' RMK ')) : raw;
+  // An automated station with a failed ceilometer simply omits the sky group.
+  // That means "unknown", never "clear": ceiling and category stay null.
+  const skyReported = SKY_GROUP.test(body) || (Array.isArray(metar.clouds) && metar.clouds.length > 0);
+  const layers = skyReported ? cloudLayers(metar.clouds, raw) : null;
+  const visibility = parseVisibility(metar.visib);
+  const vertVis = toNumber(metar.vertVis);
+  const ceiling = layers ? ceilingFrom(layers, vertVis) : vertVis;
   return {
     station: metar.icaoId || null,
     name: metar.name || null,
@@ -101,13 +106,14 @@ export function normalizeMetar(metar) {
     visibility_plus: visibility.plus,
     wx: (metar.wxString || '').trim(),
     clouds: layers,
-    clear: layers.length === 0 || layers.every((layer) => ['CLR', 'SKC', 'NSC', 'CAVOK'].includes(layer.cover)),
+    sky_reported: skyReported,
+    clear: Boolean(layers) && (layers.length === 0 || layers.every((layer) => ['CLR', 'SKC', 'NSC', 'NCD', 'CAVOK'].includes(layer.cover))),
     ceiling_ft: ceiling,
     vertical_visibility_ft: vertVis,
     temp_c: toNumber(metar.temp),
     dewpoint_c: toNumber(metar.dewp),
     altimeter_inhg: parseAltimeterInHg(body, metar.altim),
-    flight_category: metar.fltCat || flightCategory(ceiling, visibility.sm),
+    flight_category: metar.fltCat || (skyReported && visibility.sm != null ? flightCategory(ceiling, visibility.sm) : null),
     remarks,
     lat: toNumber(metar.lat),
     lon: toNumber(metar.lon),

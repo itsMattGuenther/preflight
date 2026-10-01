@@ -24,7 +24,7 @@ export default handler(async (req) => {
 
   const forecasts = await Promise.all(['06', '12'].map(async (hours) => {
     try {
-      const { value } = await cached(`winds/v1/${hours}`, 30 * 60 * 1000, async () => parseFdText(await fetchText(FD_URL(hours))));
+      const { value } = await cached(`winds/v1/${hours}`, 30 * 60 * 1000, async () => parseFdText(await fetchText(FD_URL(hours))), { maxStaleMs: 6 * 60 * 60 * 1000 });
       return {
         hours,
         based_on: value.based_on,

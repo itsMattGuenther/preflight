@@ -56,7 +56,9 @@ export default handler(async (req) => {
   const center = coordinateParams(new URL(req.url));
   if (!center) return badRequest('lat and lon are required');
 
-  const { value: collection, cached_utc, stale } = await cached('tfr/v1/national', 5 * 60 * 1000, () => fetchJson(GEO_URL, { timeoutMs: 10000 }));
+  // A TFR list more than an hour old is not served at all (the request fails
+  // and the UI says TFRs could not be checked).
+  const { value: collection, cached_utc, stale } = await cached('tfr/v1/national', 5 * 60 * 1000, () => fetchJson(GEO_URL, { timeoutMs: 8000 }), { maxStaleMs: 60 * 60 * 1000 });
   const features = Array.isArray(collection?.features) ? collection.features : [];
 
   // A TFR may be split into several features (one per area); keep the closest.

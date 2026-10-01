@@ -463,8 +463,8 @@ export default handler(async (req) => {
   // Local and market feeds are independent, so a failure in one should not hide
   // the other. allSettled lets us return warnings with whatever data survived.
   const [localResult, reportResult] = await Promise.allSettled([
-    cached(`fuel/v1/local/${icao}`, LOCAL_TTL_MS, async () => parseLocalFuel(icao, await fetchText(airportUrl), airportUrl)),
-    cached('fuel/v1/report', REPORT_TTL_MS, async () => parseMarket(await fetchText(REPORT_URL))),
+    cached(`fuel/v1/local/${icao}`, LOCAL_TTL_MS, async () => parseLocalFuel(icao, await fetchText(airportUrl), airportUrl), { maxStaleMs: 7 * 24 * 60 * 60 * 1000 }),
+    cached('fuel/v1/report', REPORT_TTL_MS, async () => parseMarket(await fetchText(REPORT_URL)), { maxStaleMs: 14 * 24 * 60 * 60 * 1000 }),
   ]);
 
   if (localResult.status === 'fulfilled') {

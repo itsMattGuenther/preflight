@@ -4,7 +4,7 @@ import { fetchJson, handler, json } from '../lib/http.js';
 const RAINVIEWER_URL = 'https://api.rainviewer.com/public/weather-maps.json';
 
 export default handler(async () => {
-  const { value: body } = await cached('radar/v1/index', 4 * 60 * 1000, () => fetchJson(RAINVIEWER_URL, { timeoutMs: 6000 }));
+  const { value: body } = await cached('radar/v1/index', 4 * 60 * 1000, () => fetchJson(RAINVIEWER_URL, { timeoutMs: 6000 }), { maxStaleMs: 30 * 60 * 1000 });
   const past = Array.isArray(body.radar?.past) ? body.radar.past : [];
   // The UI animates the last several frames so pilots can see which way cells
   // are moving, not just where they are.

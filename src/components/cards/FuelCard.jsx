@@ -10,7 +10,7 @@ function delta(item) {
 }
 
 export function FuelCard({ fuel }) {
-  if (fuel.isLoading) return <Card title="Fuel" icon={Fuel} className="area-fuel"><Skeleton lines={3} /></Card>;
+  if (fuel.isPending) return <Card title="Fuel" icon={Fuel} className="area-fuel"><Skeleton lines={3} /></Card>;
   const local = fuel.data?.local;
   const items = local?.fuels || [];
   return (

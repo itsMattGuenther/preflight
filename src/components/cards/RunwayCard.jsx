@@ -105,7 +105,7 @@ function cross(item) {
 
 export function RunwayCard({ airport, weather, minimums }) {
   const metar = weather.data?.metar;
-  if (!airport || weather.isLoading) return <Card title="Runways & wind" icon={Wind} className="area-runway"><Skeleton lines={5} /></Card>;
+  if (!airport || weather.isPending) return <Card title="Runways & wind" icon={Wind} className="area-runway"><Skeleton lines={5} /></Card>;
   const runways = airport.runways || [];
   if (!runways.length) {
     return <Card title="Runways & wind" icon={Wind} className="area-runway"><Notice tone="warning">No runway data for this airport. Check the Chart Supplement.</Notice></Card>;
@@ -122,7 +122,9 @@ export function RunwayCard({ airport, weather, minimums }) {
       <div className="runway-layout">
         <RunwayDiagram runways={runways} ranked={ranked} wind={metar} />
         <div className="runway-best">
-          {best ? (
+          {best && (!metar || metar.wind_speed_kt == null) ? (
+            <Notice tone="warning">No wind report available, so crosswind can&apos;t be computed. Check the AWOS/ATIS before you fly.</Notice>
+          ) : best ? (
             <>
               <div className="control-label">Best runway for your limits</div>
               <div className="best-id">RWY {best.id}</div>

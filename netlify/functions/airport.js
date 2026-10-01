@@ -7,13 +7,17 @@ import {
   runwaysFromFallback,
   splitAwcName,
 } from '../lib/airportData.js';
-import { cached } from '../lib/cache.js';
+import { cached, TTL_OVERRIDE } from '../lib/cache.js';
 import fallbackAirports from '../lib/data/airports-fallback.json';
 import { bearingDeg, distanceNm, round1 } from '../lib/geo.js';
 import { fetchJson, fetchText, handler, json, normalizeIcao, badRequest } from '../lib/http.js';
 
 const API_BASE = 'https://aviationweather.gov/api/data';
 const AIRPORT_TTL_MS = 24 * 60 * 60 * 1000;
+// If AviationWeather's airport record failed to load, the result (built from
+// station info / OurAirports) is cached briefly so the full FAA record is
+// picked up soon, rather than a degraded copy sticking for a day.
+const DEGRADED_TTL_MS = 15 * 60 * 1000;
 
 function fallbackRecord(id) {
   // OurAirports keys small fields by their FAA id (7M5) and others by ICAO.
@@ -101,7 +105,7 @@ async function scrapedFrequencies(icao, faaId) {
   ];
   for (const provider of providers) {
     try {
-      const frequencies = provider.parse(await fetchText(provider.url, { timeoutMs: 6000 }));
+      const frequencies = provider.parse(await fetchText(provider.url, { timeoutMs: 4500, retries: 0 }));
       if (frequencies.length) return { frequencies, source: { label: provider.label, url: provider.url } };
     } catch {
       // Try the next provider.
@@ -135,13 +139,22 @@ async function nearbyStations(center, selfId) {
 }
 
 async function loadAirport(icao) {
-  const [airports, stations] = await Promise.all([
-    fetchJson(`${API_BASE}/airport?ids=${icao}&format=json`).catch(() => []),
-    fetchJson(`${API_BASE}/stationinfo?ids=${icao}&format=json`).catch(() => []),
+  const early = fallbackRecord(icao);
+  let awcFailed = false;
+  // Everything that does not depend on another response runs in parallel;
+  // when OurAirports already knows the location, the nearby-station lookup
+  // starts immediately too.
+  const [airports, stations, earlyNearby] = await Promise.all([
+    fetchJson(`${API_BASE}/airport?ids=${icao}&format=json`, { timeoutMs: 6000 }).catch(() => {
+      awcFailed = true;
+      return [];
+    }),
+    fetchJson(`${API_BASE}/stationinfo?ids=${icao}&format=json`, { timeoutMs: 6000 }).catch(() => []),
+    early?.la != null ? nearbyStations({ lat: early.la, lon: early.lo }, icao) : Promise.resolve(null),
   ]);
   const awc = Array.isArray(airports) ? airports[0] : null;
   const station = Array.isArray(stations) ? stations[0] : null;
-  const fallback = fallbackRecord(icao) || (awc?.faaId ? fallbackRecord(awc.faaId) : null);
+  const fallback = early || (awc?.faaId ? fallbackRecord(awc.faaId) : null);
 
   const lat = Number(awc?.lat ?? station?.lat ?? fallback?.la);
   const lon = Number(awc?.lon ?? station?.lon ?? fallback?.lo);
@@ -161,12 +174,14 @@ async function loadAirport(icao) {
 
   let frequencies = parseAwcFrequencies(awc?.freqs);
   let frequencySource = frequencies.length ? { label: 'FAA via AviationWeather.gov', url: 'https://aviationweather.gov/' } : null;
-  if (!frequencies.length || !frequencies.some((item) => ['ctaf', 'tower', 'unicom'].includes(item.kind))) {
-    const scraped = await scrapedFrequencies(id, faaId);
-    if (scraped) {
-      frequencies = scraped.frequencies;
-      frequencySource = scraped.source;
-    }
+  const needScrape = !frequencies.length || !frequencies.some((item) => ['ctaf', 'tower', 'unicom'].includes(item.kind));
+  const [scraped, nearby] = await Promise.all([
+    needScrape ? scrapedFrequencies(id, faaId) : Promise.resolve(null),
+    earlyNearby || nearbyStations({ lat, lon }, id),
+  ]);
+  if (scraped) {
+    frequencies = scraped.frequencies;
+    frequencySource = scraped.source;
   }
 
   let timezone = null;
@@ -199,7 +214,8 @@ async function loadAirport(icao) {
       frequency_source: frequencySource,
       data_source: awc ? 'FAA via AviationWeather.gov' : 'OurAirports (verify in Chart Supplement)',
     },
-    nearby: await nearbyStations({ lat, lon }, id),
+    nearby: nearby.filter((item) => item.icao !== id),
+    degraded: awcFailed,
   };
 }
 
@@ -213,7 +229,7 @@ export default handler(async (req) => {
     // Do not cache "not found": a typo should not be remembered for a day,
     // and a briefly unavailable upstream should be retried next request.
     if (!result) throw Object.assign(new Error('not found'), { notFound: true });
-    return result;
+    return result.degraded ? { [TTL_OVERRIDE]: DEGRADED_TTL_MS, value: result } : result;
   }).catch((error) => {
     if (error.notFound) return { value: null };
     throw error;

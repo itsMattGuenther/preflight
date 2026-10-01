@@ -16,11 +16,16 @@ export function MinimumsEditor({ open, onClose, minimums, isExample, onSave, onR
   function submit(event) {
     event.preventDefault();
     const clean = { ...draft };
+    // A cleared field keeps the saved value. (Number('') is 0, which would
+    // otherwise be clamped to the most permissive limit, e.g. 500 ft / 1 SM.)
+    const fallback = (key) => minimums[key] ?? PRESETS.student.values[key];
     for (const field of MINIMUM_FIELDS) {
-      const value = Number(clean[field.key]);
-      clean[field.key] = Number.isFinite(value) ? Math.min(field.max, Math.max(field.min, value)) : PRESETS.student.values[field.key];
+      const raw = clean[field.key];
+      const value = raw === '' || raw == null ? NaN : Number(raw);
+      clean[field.key] = Number.isFinite(value) ? Math.min(field.max, Math.max(field.min, value)) : fallback(field.key);
     }
-    clean.margin_pct = Math.min(50, Math.max(0, Number(clean.margin_pct) || 0));
+    const margin = clean.margin_pct === '' ? NaN : Number(clean.margin_pct);
+    clean.margin_pct = Number.isFinite(margin) ? Math.min(50, Math.max(0, margin)) : fallback('margin_pct');
     onSave(clean);
     onClose();
   }

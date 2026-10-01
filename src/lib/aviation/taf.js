@@ -34,6 +34,18 @@ export function basePeriodAt(taf, t) {
   return current || bases[0] || null;
 }
 
+// During a BECMG group's transition (from its start until `becoming_by`) the
+// change can happen at any moment, so both the old and new conditions apply.
+export function transitionFromAt(taf, t) {
+  const current = basePeriodAt(taf, t);
+  if (!current || current.change !== 'BECMG') return null;
+  const until = ms(current.becoming_by_utc);
+  if (until == null || t >= until) return null;
+  const bases = (taf.periods || []).filter((period) => !['TEMPO', 'PROB'].includes(period.change));
+  const index = bases.indexOf(current);
+  return index > 0 ? bases[index - 1] : null;
+}
+
 export function overlaysAt(taf, t) {
   if (!tafValid(taf, t)) return [];
   return (taf.periods || []).filter((period) => {
@@ -85,8 +97,10 @@ export function tafSlots(taf, startMs, hours = 24) {
       continue;
     }
     const overlays = overlaysAt(taf, mid).map((overlay) => applyOverlay(base, overlay));
-    const worst = overlays.reduce((acc, item) => worseCategory(acc, item.flight_category), base.flight_category);
-    slots.push({ t, base, overlays, category: base.flight_category, worst });
+    const previous = transitionFromAt(taf, mid);
+    const category = worseCategory(base.flight_category, previous?.flight_category);
+    const worst = overlays.reduce((acc, item) => worseCategory(acc, item.flight_category), category);
+    slots.push({ t, base, overlays, category, worst });
   }
   return slots;
 }
@@ -107,6 +121,11 @@ export function tafConditionsInWindow(taf, startMs, endMs) {
     if (!seen.has(baseKey)) {
       seen.add(baseKey);
       results.push({ kind: 'forecast', period: base, conditions: base });
+    }
+    const previous = transitionFromAt(taf, t);
+    if (previous && !seen.has(`B${previous.from_utc}`)) {
+      seen.add(`B${previous.from_utc}`);
+      results.push({ kind: 'forecast', period: { ...previous, to_utc: base.becoming_by_utc }, conditions: previous });
     }
     for (const overlay of overlaysAt(taf, t)) {
       const key = `O${overlay.change}${overlay.from_utc}${overlay.probability}`;
