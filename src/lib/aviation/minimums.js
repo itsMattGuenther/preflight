@@ -324,7 +324,7 @@ export function evaluateMinimums({
       checks.push({ ...base, value: relevant.length ? 'None in effect during your flight' : 'None within 10 NM' });
     }
   } else {
-    notChecked.push('TFRs: feed unavailable, check tfr.faa.gov');
+    checks.push({ ...check('tfr', 'TFRs', 'None within 10 NM'), status: 'unknown', value: 'Feed unavailable', note: 'Check tfr.faa.gov before flight' });
   }
 
   // Weather advisories over the field.
@@ -335,6 +335,9 @@ export function evaluateMinimums({
     const over = [...(advisories.sigmets || []), ...(advisories.cwas || []), ...(advisories.gairmets || [])].filter((item) => item.over_field);
     const relevant = over.filter((item) => item.hazard !== 'TURB-HI');
     const severe = relevant.find((item) => item.kind?.includes('SIGMET') || (item.kind === 'Center Weather Advisory' && /TS/.test(item.hazard || '')));
+    // A convective SIGMET just outside the field still means thunderstorms
+    // within a few minutes' flying.
+    const convectiveNearby = (advisories.sigmets || []).find((item) => !item.over_field && item.hazard === 'CONVECTIVE' && item.distance_nm <= 10);
     // Mountain obscuration and icing well above pattern altitude matter for
     // cross-countries but not for a local flight, so they are shown as info.
     const isCaution = (item) => !['MT_OBSC', 'ICE'].includes(item.hazard) || (item.hazard === 'ICE' && (item.base_ft ?? 0) <= 5000);
@@ -343,6 +346,8 @@ export function evaluateMinimums({
     const base = check('advisories', 'SIGMETs / AIRMETs', 'None over field');
     if (severe) {
       checks.push({ ...base, status: 'fail', value: `${severe.kind} in effect`, note: severe.hazard });
+    } else if (convectiveNearby) {
+      checks.push({ ...base, status: 'caution', value: `Convective SIGMET ${convectiveNearby.distance_nm} NM away`, note: 'Thunderstorms forecast near the field' });
     } else if (cautions.length) {
       checks.push({ ...base, status: 'caution', value: label(cautions), note: 'AIRMET-level hazard forecast over the airport' });
     } else if (missing.length) {
@@ -353,7 +358,7 @@ export function evaluateMinimums({
       checks.push({ ...base, value: 'None over the field' });
     }
   } else {
-    notChecked.push('SIGMETs/AIRMETs: feed unavailable');
+    checks.push({ ...check('advisories', 'SIGMETs / AIRMETs', 'None over field'), status: 'unknown', value: 'Feed unavailable', note: 'Check aviationweather.gov before flight' });
   }
 
   // NOTAMs.
@@ -362,9 +367,13 @@ export function evaluateMinimums({
   } else {
     const closures = (notams.notams || []).filter((notam) => classifyNotam(notam) === 'closure' && isActiveDuring(notam, startMs, endMs));
     const airportClosed = closures.find((notam) => /\b(AD|AP)\b[^.]*\bCLSD\b|\bAIRPORT CLOSED\b/.test(String(notam.text).toUpperCase()));
+    // Closing every runway closes the airport for an airplane.
+    const closedRunways = new Set(closures.flatMap((notam) => [...String(notam.text).toUpperCase().matchAll(/\bRWY\s+([0-9]{1,2}[LCR]?(?:\/[0-9]{1,2}[LCR]?)?)\s+CLSD\b/g)].map((match) => match[1])));
+    const allRunwaysClosed = runways.length > 0 && runways.every((runway) => closedRunways.has(runway.id) || runway.ends.some((end) => closedRunways.has(end.id)));
     const base = check('notams', 'Closure NOTAMs', 'None');
-    if (airportClosed) {
-      checks.push({ ...base, status: 'fail', value: 'Airport closure NOTAM', note: airportClosed.text.slice(0, 140) });
+    if (airportClosed || allRunwaysClosed) {
+      const notam = airportClosed || closures[0];
+      checks.push({ ...base, status: 'fail', value: airportClosed ? 'Airport closure NOTAM' : 'All runways closed', note: notam.text.slice(0, 140) });
     } else if (closures.length) {
       checks.push({ ...base, status: 'caution', value: `${closures.length} runway closure NOTAM${closures.length > 1 ? 's' : ''}`, note: closures[0].text.slice(0, 140) });
     } else {

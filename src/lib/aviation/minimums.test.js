@@ -197,6 +197,22 @@ describe('evaluateMinimums', () => {
   it('fails on an airport closure NOTAM but only cautions on a runway closure', () => {
     const notams = (text) => ({ configured: true, notams: [{ id: '1', text, effective_from_utc: null, effective_to_utc: null }] });
     expect(statusOf(evaluate({ notams: notams('AD AP CLSD') }), 'notams')).toBe('fail');
-    expect(statusOf(evaluate({ notams: notams('RWY 18/36 CLSD') }), 'notams')).toBe('caution');
+    const twoRunways = { ...airport, runways: [...airport.runways, { id: '09/27', paved: true, length_ft: 4000, ends: [{ id: '09', heading_true: 90 }, { id: '27', heading_true: 270 }] }] };
+    expect(statusOf(evaluate({ airport: twoRunways, notams: notams('RWY 18/36 CLSD') }), 'notams')).toBe('caution');
+  });
+
+  it('is not "within" when the TFR or advisory feed fails outright', () => {
+    expect(evaluate({ tfrs: null }).verdict).toBe('unknown');
+    expect(evaluate({ advisories: null }).verdict).toBe('unknown');
+  });
+
+  it('fails when every runway is closed by NOTAM', () => {
+    const notams = { configured: true, notams: [{ id: '1', text: 'RWY 18/36 CLSD', effective_from_utc: null, effective_to_utc: null }] };
+    expect(statusOf(evaluate({ notams }), 'notams')).toBe('fail');
+  });
+
+  it('cautions on a convective SIGMET just outside the field', () => {
+    const advisories = { sigmets: [{ kind: 'Convective SIGMET', hazard: 'CONVECTIVE', distance_nm: 8, over_field: false }], gairmets: [], cwas: [], unavailable: [], stale: [] };
+    expect(statusOf(evaluate({ advisories }), 'advisories')).toBe('caution');
   });
 });
