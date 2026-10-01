@@ -7,12 +7,11 @@ import './index.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Serverless functions already cache some public feeds. These defaults
-      // keep the UI from hammering APIs while still allowing panel-specific
-      // hooks to opt into faster refetches for radar/traffic/weather.
-      retry: 2,
-      refetchOnWindowFocus: false,
-      staleTime: 60_000,
+      // Each hook sets its own staleTime/refetchInterval. Returning to the tab
+      // refetches anything stale, so a briefing left open overnight is fresh
+      // when the pilot looks at it again.
+      retry: 1,
+      refetchOnWindowFocus: true,
     },
   },
 });

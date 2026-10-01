@@ -1,94 +1,104 @@
-import { requireAuth, json } from './_auth.js';
+import { cached } from '../lib/cache.js';
+import { distanceToPolygonNm, round1, toRing } from '../lib/geo.js';
+import { coordinateParams, fetchJson, fetchText, handler, json, badRequest } from '../lib/http.js';
 
-const API_BASE = 'https://aviationweather.gov/api/data';
-const TFR_URL = 'https://tfr.faa.gov/tfrapi/exportTfrList';
+// The FAA's TFR list API (tfrapi/exportTfrList) has no coordinates, so the
+// previous distance filter silently matched nothing. The FAA TFR GeoServer
+// layer has the actual polygons; detail XML adds effective times/altitudes.
+const GEO_URL = 'https://tfr.faa.gov/geoserver/TFR/ows?service=WFS&version=1.1.0&request=GetFeature&typeName=TFR:V_TFR_LOC&maxFeatures=1000&outputFormat=application/json&srsname=EPSG:4326';
+const DETAIL_URL = (key) => `https://tfr.faa.gov/download/detail_${key}.xml`;
+const PAGE_URL = (key) => `https://tfr.faa.gov/tfr3/?page=detail_${key}`;
+const SEARCH_RADIUS_NM = 100;
+const DETAIL_RADIUS_NM = 50;
 
-async function airportPoint(icao) {
-  // TFR records are not requested by airport, so first resolve the selected
-  // airport's point and use it for distance filtering.
-  const res = await fetch(`${API_BASE}/stationinfo?ids=${icao}&format=json`);
-  if (!res.ok) return { lat: 36.3444, lon: -94.2211 };
-  const stations = await res.json();
-  const station = Array.isArray(stations) ? stations[0] : null;
+function notamId(feature) {
+  // NOTAM_KEY looks like "6/6618-1-FDC-F"; the NOTAM number is "6/6618".
+  return String(feature.properties?.NOTAM_KEY || '').split('-')[0] || null;
+}
+
+function rings(geometry) {
+  if (!geometry) return [];
+  if (geometry.type === 'Polygon') return [toRing(geometry.coordinates[0])];
+  if (geometry.type === 'MultiPolygon') return geometry.coordinates.map((polygon) => toRing(polygon[0]));
+  return [];
+}
+
+function tagValues(xml, tag) {
+  return [...String(xml).matchAll(new RegExp(`<${tag}>([^<]*)</${tag}>`, 'g'))].map((match) => match[1].trim());
+}
+
+export function parseDetail(xml) {
+  // Times in the detail XML are UTC. A TFR can have several areas/schedules;
+  // report the overall window and the highest ceiling.
+  const effective = tagValues(xml, 'dateEffective').map((value) => Date.parse(`${value}Z`)).filter(Number.isFinite);
+  const expire = tagValues(xml, 'dateExpire').map((value) => Date.parse(`${value}Z`)).filter(Number.isFinite);
+  const uppers = tagValues(xml, 'valDistVerUpper').map(Number).filter(Number.isFinite);
+  const upperUnits = tagValues(xml, 'uomDistVerUpper');
+  const upperCodes = tagValues(xml, 'codeDistVerUpper');
+  const topIndex = uppers.length ? uppers.indexOf(Math.max(...uppers)) : -1;
+  let top = topIndex >= 0 ? uppers[topIndex] : null;
+  if (top != null && (upperUnits[topIndex] === 'FL' || upperCodes[topIndex] === 'STD')) top *= 100;
   return {
-    lat: Number(station?.lat ?? 36.3444),
-    lon: Number(station?.lon ?? -94.2211),
+    effective_utc: effective.length ? new Date(Math.min(...effective)).toISOString() : null,
+    expire_utc: expire.length ? new Date(Math.max(...expire)).toISOString() : null,
+    top_ft: top,
+    top_unlimited: top != null && top >= 99999,
   };
 }
 
-function distanceNm(a, b) {
-  const rad = Math.PI / 180;
-  const lat1 = a.lat * rad;
-  const lat2 = b.lat * rad;
-  const dLat = (b.lat - a.lat) * rad;
-  const dLon = (b.lon - a.lon) * rad;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-  return Math.round(3440.065 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)));
+async function detail(key) {
+  return cached(`tfr/v1/detail/${key}`, 60 * 60 * 1000, async () => parseDetail(await fetchText(DETAIL_URL(key), { timeoutMs: 5000 })))
+    .then((result) => result.value)
+    .catch(() => null);
 }
 
-function coordinatesFrom(record) {
-  // FAA TFR exports can be flat records or GeoJSON. For polygons, use a simple
-  // coordinate average as the display/filtering center.
-  if (record.lat && record.lon) return { lat: Number(record.lat), lon: Number(record.lon) };
-  if (record.latitude && record.longitude) return { lat: Number(record.latitude), lon: Number(record.longitude) };
-  const coords = record.geometry?.coordinates;
-  if (Array.isArray(coords) && typeof coords[0] === 'number') return { lon: Number(coords[0]), lat: Number(coords[1]) };
-  if (Array.isArray(coords)) {
-    const pairs = [];
-    const visit = (value) => {
-      if (!Array.isArray(value)) return;
-      if (typeof value[0] === 'number' && typeof value[1] === 'number') {
-        pairs.push(value);
-        return;
-      }
-      value.forEach(visit);
-    };
-    visit(coords);
-    if (pairs.length) {
-      const summed = pairs.reduce((acc, item) => ({ lon: acc.lon + Number(item[0]), lat: acc.lat + Number(item[1]) }), { lat: 0, lon: 0 });
-      return { lat: summed.lat / pairs.length, lon: summed.lon / pairs.length };
+export default handler(async (req) => {
+  const center = coordinateParams(new URL(req.url));
+  if (!center) return badRequest('lat and lon are required');
+
+  // A TFR list more than an hour old is not served at all (the request fails
+  // and the UI says TFRs could not be checked).
+  const { value: collection, cached_utc, stale } = await cached('tfr/v1/national', 5 * 60 * 1000, () => fetchJson(GEO_URL, { timeoutMs: 8000 }), { maxStaleMs: 60 * 60 * 1000 });
+  const features = Array.isArray(collection?.features) ? collection.features : [];
+
+  // A TFR may be split into several features (one per area); keep the closest.
+  const byId = new Map();
+  for (const feature of features) {
+    const id = notamId(feature);
+    if (!id) continue;
+    const distance = Math.min(...rings(feature.geometry).filter((ring) => ring.length >= 3).map((ring) => distanceToPolygonNm(center, ring)));
+    if (!Number.isFinite(distance) || distance > SEARCH_RADIUS_NM) continue;
+    const existing = byId.get(id);
+    if (!existing || distance < existing.distance_nm) {
+      byId.set(id, {
+        id,
+        key: id.replace('/', '_'),
+        type: feature.properties?.LEGAL || 'TFR',
+        title: feature.properties?.TITLE || '',
+        state: feature.properties?.STATE || null,
+        distance_nm: round1(distance),
+        inside: distance === 0,
+      });
     }
   }
-  return null;
-}
 
-function normalize(record, distance) {
-  return {
-    id: record.notam_id || record.id || record.notamId || 'unknown',
-    type: record.type || record.tfr_type || 'TFR',
-    summary: record.description || record.summary || record.title || '',
-    distance_nm: distance,
-    ceiling_ft: Number(record.ceiling_ft || record.ceiling || record.upper_altitude || 0) || null,
-    floor_ft: Number(record.floor_ft || record.floor || record.lower_altitude || 0) || 0,
-    active: record.active !== false,
-    effective_from_utc: record.effective_from_utc || record.startDate || record.start_date || null,
-    effective_to_utc: record.effective_to_utc || record.endDate || record.end_date || null,
-  };
-}
+  const nearby = [...byId.values()].sort((a, b) => a.distance_nm - b.distance_nm);
+  const now = Date.now();
+  const tfrs = await Promise.all(nearby.map(async (tfr) => {
+    const info = tfr.distance_nm <= DETAIL_RADIUS_NM ? await detail(tfr.key) : null;
+    const from = info?.effective_utc ? Date.parse(info.effective_utc) : null;
+    const to = info?.expire_utc ? Date.parse(info.expire_utc) : null;
+    const active = info ? (from == null || from <= now) && (to == null || to > now) : null;
+    return {
+      ...tfr,
+      ...(info || {}),
+      active,
+      url: PAGE_URL(tfr.key),
+    };
+  }));
 
-export default async (req) => {
-  const auth = requireAuth(req.headers);
-  if (!auth.ok) return json({ error: auth.message }, { status: auth.status });
-
-  const url = new URL(req.url);
-  const icao = (url.searchParams.get('icao') || 'KVBT').toUpperCase();
-  const center = await airportPoint(icao);
-  const res = await fetch(TFR_URL);
-  if (!res.ok) return json({ error: `TFR feed returned ${res.status}` }, { status: 502 });
-  const records = await res.json();
-  const tfrs = Array.isArray(records) ? records : records.features || [];
-  // Keep only TFRs within 100 NM of the selected airport. The cards can then
-  // show nearby restrictions without rendering a national feed.
-  const nearby = tfrs
-    .map((record) => {
-      const source = record.properties ? { ...record.properties, geometry: record.geometry } : record;
-      const coords = coordinatesFrom(source);
-      if (!coords) return null;
-      const distance = distanceNm(center, coords);
-      return distance <= 100 ? normalize(source, distance) : null;
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.distance_nm - b.distance_nm);
-
-  return json({ fetched_utc: new Date().toISOString(), tfrs_nearby: nearby });
-};
+  return json(
+    { fetched_utc: new Date().toISOString(), source_cached_utc: cached_utc, stale, radius_nm: SEARCH_RADIUS_NM, tfrs },
+    { headers: { 'Cache-Control': 'public, max-age=300' } },
+  );
+});

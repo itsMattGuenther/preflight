@@ -1,42 +1,24 @@
-import { requireAuth, json } from './_auth.js';
+import { cached } from '../lib/cache.js';
+import { fetchJson, handler, json } from '../lib/http.js';
 
 const RAINVIEWER_URL = 'https://api.rainviewer.com/public/weather-maps.json';
 
-export default async (req) => {
-  const auth = requireAuth(req.headers);
-  if (!auth.ok) return json({ error: auth.message }, { status: auth.status });
-
-  const res = await fetch(RAINVIEWER_URL, {
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': 'preflight-dashboard/1.0',
-    },
-  });
-
-  if (!res.ok) {
-    return json({ error: `RainViewer returned ${res.status}` }, { status: 502 });
-  }
-
-  const body = await res.json();
+export default handler(async () => {
+  const { value: body } = await cached('radar/v1/index', 4 * 60 * 1000, () => fetchJson(RAINVIEWER_URL, { timeoutMs: 6000 }), { maxStaleMs: 30 * 60 * 1000 });
   const past = Array.isArray(body.radar?.past) ? body.radar.past : [];
-  // RainViewer returns a list of past radar frames. The UI only needs the most
-  // recent path and the host so it can assemble map tile URLs.
-  const latest = past[past.length - 1] || null;
+  // The UI animates the last several frames so pilots can see which way cells
+  // are moving, not just where they are.
+  const frames = past.slice(-6).map((frame) => ({ time_utc: new Date(frame.time * 1000).toISOString(), path: frame.path }));
 
   return json(
     {
       fetched_utc: new Date().toISOString(),
-      generated_utc: body.generated ? new Date(body.generated * 1000).toISOString() : null,
       source: 'RainViewer',
-      source_url: 'https://www.rainviewer.com/api/weather-maps-api.html',
+      source_url: 'https://www.rainviewer.com/',
       host: body.host || 'https://tilecache.rainviewer.com',
-      radar: latest
-        ? {
-            time_utc: new Date(latest.time * 1000).toISOString(),
-            path: latest.path,
-          }
-        : null,
+      frames,
+      radar: frames.at(-1) || null,
     },
-    { headers: { 'Cache-Control': 'public, max-age=300' } },
+    { headers: { 'Cache-Control': 'public, max-age=240' } },
   );
-};
+});
