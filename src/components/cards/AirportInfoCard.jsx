@@ -1,5 +1,6 @@
-import { Info } from 'lucide-react';
+import { Headphones, Info } from 'lucide-react';
 import { formatFeet } from '../../lib/format';
+import { airNavUrl, liveAtcUrl, skyVectorUrl } from '../../lib/links';
 import { Card, LinkOut, Skeleton } from '../ui';
 
 // Keep the VHF frequencies a VFR pilot dials (118-137 MHz); drop UHF
@@ -14,25 +15,50 @@ const KIND_LABEL = {
   atis: 'ATIS', awos: 'Weather', tower: 'Tower', ctaf: 'CTAF', unicom: 'UNICOM', ground: 'Ground', clearance: 'Clearance', approach: 'Approach / departure', other: 'Other',
 };
 
-export function AirportInfoCard({ airport }) {
+export function AirportInfoCard({ airport, nearby }) {
   if (!airport) return <Card title="Airport & frequencies" icon={Info} className="area-info"><Skeleton lines={6} /></Card>;
-  const faa = airport.faa_id || airport.icao;
   const frequencies = [...(airport.frequencies || [])].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+  // Approach/departure and center are usually streamed from the nearest
+  // towered airport's LiveATC feeds, so offer those too.
+  const nearbyFeeds = (nearby || []).filter((item) => item.distance_nm <= 40).slice(0, 4);
+  const listen = liveAtcUrl(airport.icao);
 
   return (
-    <Card title="Airport & frequencies" icon={Info} className="area-info">
+    <Card
+      title="Airport & frequencies"
+      icon={Info}
+      className="area-info"
+      action={<a className="listen-button" href={listen} target="_blank" rel="noreferrer"><Headphones size={14} /> Listen live</a>}
+    >
       <div className="freq-list">
         {frequencies.length ? frequencies.map((freq) => (
-          <div key={`${freq.label}-${freq.value}`} className={`freq freq-${freq.kind}`}>
+          <a
+            key={`${freq.label}-${freq.value}`}
+            className={`freq freq-${freq.kind}`}
+            href={freq.kind === 'approach' && nearbyFeeds[0] ? liveAtcUrl(nearbyFeeds[0].icao) : listen}
+            target="_blank"
+            rel="noreferrer"
+            title="Find a LiveATC stream for this frequency"
+          >
             <span className="freq-kind">{KIND_LABEL[freq.kind]}</span>
             <span className="freq-label">{freq.label}</span>
             <span className="freq-value mono">{vhf(freq.value)}</span>
-          </div>
+            <Headphones className="freq-listen" size={13} aria-hidden="true" />
+          </a>
         )) : <p className="muted small">No frequencies found. Check the Chart Supplement.</p>}
       </div>
-      {airport.frequency_source ? (
-        <p className="fine-print">Frequencies: {airport.frequency_source.label}. Verify in the current Chart Supplement before use.</p>
-      ) : null}
+      <div className="listen-row">
+        <Headphones size={13} aria-hidden="true" />
+        <span>LiveATC streams:</span>
+        <a href={listen} target="_blank" rel="noreferrer">{airport.icao}</a>
+        {nearbyFeeds.map((item) => (
+          <a key={item.icao} href={liveAtcUrl(item.icao)} target="_blank" rel="noreferrer" title={`${item.name}, ${item.distance_nm} NM`}>{item.icao}</a>
+        ))}
+      </div>
+      <p className="fine-print">
+        Tap a frequency to find its LiveATC stream (volunteer feeds; not every frequency is covered). Approach is usually streamed from the
+        nearest towered field. {airport.frequency_source ? `Frequencies: ${airport.frequency_source.label}. ` : ''}Verify in the current Chart Supplement before use.
+      </p>
 
       <table className="info-table">
         <tbody>
@@ -52,9 +78,8 @@ export function AirportInfoCard({ airport }) {
       </table>
 
       <div className="link-row">
-        <LinkOut href={`https://skyvector.com/airport/${encodeURIComponent(faa)}`}>SkyVector (charts & diagram)</LinkOut>
-        <LinkOut href={`https://www.airnav.com/airport/${encodeURIComponent(airport.icao)}`}>AirNav</LinkOut>
-        <LinkOut href={`https://www.liveatc.net/search/?icao=${encodeURIComponent(airport.icao.toLowerCase())}`}>LiveATC</LinkOut>
+        <LinkOut href={skyVectorUrl(airport)}>SkyVector</LinkOut>
+        <LinkOut href={airNavUrl(airport)}>AirNav</LinkOut>
         <LinkOut href={`https://aviationweather.gov/data/metar/?id=${encodeURIComponent(airport.icao)}&hours=3&taf=on`}>AviationWeather</LinkOut>
         <LinkOut href="https://aviationweather.gov/gfa/">GFA</LinkOut>
       </div>

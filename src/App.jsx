@@ -23,6 +23,7 @@ import {
   useAdvisories,
   useAirport,
   useAirportImage,
+  useCharts,
   useFuel,
   useNotams,
   useRadar,
@@ -91,9 +92,10 @@ export default function App() {
   const winds = useWindsAloft(airport);
   const notams = useNotams(icao);
   const traffic = useTraffic(airport);
-  const fuel = useFuel(icao);
+  const fuel = useFuel(icao, airport, airportQuery.data?.nearby);
   const radar = useRadar();
   const image = useAirportImage(airport);
+  const charts = useCharts(airport);
   const lastSeen = useLastSeen(icao, weather.data?.metar);
 
   useEffect(() => {
@@ -187,7 +189,7 @@ export default function App() {
           </section>
         ) : (
           <>
-            <AirportHeader airport={airport} image={image.data} sun={sunToday} now={now} isHome={home === airport?.icao} onToggleHome={toggleHome} />
+            <AirportHeader airport={airport} image={image.data} sun={sunToday} now={now} isHome={home === airport?.icao} onToggleHome={toggleHome} charts={charts} />
             <div className="grid">
               <MinimumsCard
                 evaluation={evaluation}
@@ -203,16 +205,16 @@ export default function App() {
               />
               <ConditionsCard weather={weather} airport={airport} lastSeen={lastSeen} now={now} />
               <TafCard weather={weather} airport={airport} windowRange={windowRange} now={now} />
-              <RunwayCard airport={airport} weather={weather} minimums={minimums} />
+              <RunwayCard airport={airport} weather={weather} minimums={minimums} charts={charts} />
               <HazardsCard airport={airport} tfrs={tfrs} advisories={advisories} now={now} />
               <NotamCard airport={airport} notams={notams} now={now} />
               <RadarCard airport={airport} radar={radar} />
               <TrafficCard airport={airport} traffic={traffic} now={now} />
-              <AirportInfoCard airport={airport} />
+              <AirportInfoCard airport={airport} nearby={airportQuery.data?.nearby} />
               <NearbyCard nearby={airportQuery.data?.nearby} loading={airportQuery.isPending} onSelect={selectAirport} />
               <DaylightCard airport={airport} sun={sunToday} now={now} />
               <WindsAloftCard winds={winds} />
-              <FuelCard fuel={fuel} />
+              <FuelCard fuel={fuel} nearby={airportQuery.data?.nearby} onSelect={selectAirport} />
             </div>
           </>
         )}

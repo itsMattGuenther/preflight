@@ -150,7 +150,7 @@ function mostRecentUpdated(fuels) {
   return fuels.some((fuel) => fuel.guaranteed) ? 'Guaranteed' : null;
 }
 
-function parseAirportFuelAvailability(html) {
+export function parseAirportFuelAvailability(html) {
   // First answer the product question: does AirNav say this airport sells fuel
   // at all? This drives the explicit "No fuel for sale" state.
   const servicesHtml = /<A name=["']?svcs["']?><\/A>\s*<H3>Airport Services<\/H3>([\s\S]*?)<\/TABLE>/i.exec(String(html || ''))?.[1] || '';
@@ -266,7 +266,7 @@ function parseFuelTableText(text, { fbo, sourceUrl }) {
   return dedupeFuels(rows);
 }
 
-function parseAirportFuelTables(html, icao, sourceUrl) {
+export function parseAirportFuelTables(html, icao, sourceUrl) {
   const section = /FBO, Fuel Providers[\s\S]*?(?:Would you like to see your business listed|Other Pages about|$)/i.exec(String(html || ''))?.[0] || '';
   const localSection = section.split(/Alternatives at nearby airports/i)[0];
   const tablePattern = /<table\b[^>]*>[\s\S]*?<\/table>/gi;
@@ -372,7 +372,7 @@ function parseMarketRow(text, label) {
   };
 }
 
-function parseMarket(html) {
+export function parseMarket(html) {
   // The market report provides national/regional comparison values. Local price
   // rows remain visible even if this parser fails; they just lose comparison UI.
   const text = htmlToText(html);
@@ -416,24 +416,57 @@ function comparison(price, reference) {
   };
 }
 
-function addIndex(fuel, market) {
-  // Attach market comparison fields directly to each local row so the React
-  // component can stay presentation-focused.
-  const national = comparison(fuel.price_per_gal, market?.nationwide?.[fuel.code]);
+// AirNav's national report groups prices by FAA region.
+const FAA_REGIONS = {
+  Alaska: ['AK'],
+  Central: ['IA', 'KS', 'MO', 'NE'],
+  Eastern: ['DC', 'DE', 'MD', 'NJ', 'NY', 'PA', 'VA', 'WV'],
+  'Great Lakes': ['IL', 'IN', 'MI', 'MN', 'ND', 'OH', 'SD', 'WI'],
+  'New England': ['CT', 'MA', 'ME', 'NH', 'RI', 'VT'],
+  'Northwest Mountain': ['CO', 'ID', 'MT', 'OR', 'UT', 'WA', 'WY'],
+  Southern: ['AL', 'FL', 'GA', 'KY', 'MS', 'NC', 'PR', 'SC', 'TN', 'VI'],
+  Southwest: ['AR', 'LA', 'NM', 'OK', 'TX'],
+  'Western-Pacific': ['AZ', 'CA', 'GU', 'HI', 'NV'],
+};
 
-  return {
-    ...fuel,
-    market_avg: national.avg,
-    market_reference_label: 'AirNav national avg',
-    regional_avg: national.avg,
-    market_delta_pct: national.delta_pct,
-    market_status: national.status,
-    index_position_pct: national.index_position_pct,
-    national_avg: national.avg,
-    national_delta_pct: national.delta_pct,
-    national_market_status: national.status,
-    national_index_position_pct: national.index_position_pct,
-  };
+export function faaRegion(state) {
+  const code = String(state || '').toUpperCase();
+  return Object.entries(FAA_REGIONS).find(([, states]) => states.includes(code))?.[0] || null;
+}
+
+function reference(label, ref, price) {
+  if (!ref?.avg) return null;
+  const compared = comparison(price, ref);
+  return { label, avg: ref.avg, min: ref.min ?? null, max: ref.max ?? null, delta_pct: compared.delta_pct, status: compared.status };
+}
+
+function addIndex(fuel, market, region) {
+  // Attach national and FAA-region comparisons to each local price so the
+  // card can draw where it sits between the cheapest and priciest fuel
+  // reported in the region.
+  const national = reference('National', market?.nationwide?.[fuel.code], fuel.price_per_gal);
+  const regional = region ? reference(`${region} region`, market?.regions?.[region]?.[fuel.code], fuel.price_per_gal) : null;
+  return { ...fuel, national, regional };
+}
+
+// Cheapest posted price per fuel type at a nearby airport, from the AirNav
+// airport page's summary table only (one request per airport, cached), so a
+// pilot can see at a glance where fuel is cheaper within a short hop.
+async function nearbySummary(id) {
+  const { value } = await cached(`fuel/v1/summary/${id}`, 6 * 60 * 60 * 1000, async () => {
+    const sourceUrl = fuelUrlFor(id);
+    const html = await fetchText(sourceUrl);
+    const availability = parseAirportFuelAvailability(html);
+    const fuels = availability.hasFuel ? parseAirportFuelTables(html, id, sourceUrl) : [];
+    const cheapest = {};
+    for (const fuel of fuels) {
+      if (!cheapest[fuel.code] || fuel.price_per_gal < cheapest[fuel.code].price_per_gal) {
+        cheapest[fuel.code] = { code: fuel.code, price_per_gal: fuel.price_per_gal, service: fuel.service, updated: fuel.updated };
+      }
+    }
+    return { icao: id, has_fuel: availability.hasFuel, fuels: Object.values(cheapest), source_url: sourceUrl };
+  }, { maxStaleMs: 7 * 24 * 60 * 60 * 1000 });
+  return value;
 }
 
 // AirNav prices change at most daily, so each airport is scraped at most every
@@ -446,6 +479,12 @@ export default handler(async (req) => {
   const url = new URL(req.url);
   const icao = normalizeIcao(url.searchParams.get('icao'));
   if (!icao) return badRequest('icao is required');
+  const region = faaRegion(url.searchParams.get('state'));
+  const nearbyIds = String(url.searchParams.get('nearby') || '')
+    .split(',')
+    .map(normalizeIcao)
+    .filter((id) => id && id !== icao)
+    .slice(0, 5);
   const airportUrl = fuelUrlFor(icao);
   const warnings = [];
   let local = {
@@ -462,9 +501,10 @@ export default handler(async (req) => {
 
   // Local and market feeds are independent, so a failure in one should not hide
   // the other. allSettled lets us return warnings with whatever data survived.
-  const [localResult, reportResult] = await Promise.allSettled([
+  const [localResult, reportResult, ...nearbyResults] = await Promise.allSettled([
     cached(`fuel/v1/local/${icao}`, LOCAL_TTL_MS, async () => parseLocalFuel(icao, await fetchText(airportUrl), airportUrl), { maxStaleMs: 7 * 24 * 60 * 60 * 1000 }),
     cached('fuel/v1/report', REPORT_TTL_MS, async () => parseMarket(await fetchText(REPORT_URL)), { maxStaleMs: 14 * 24 * 60 * 60 * 1000 }),
+    ...nearbyIds.map((id) => nearbySummary(id)),
   ]);
 
   if (localResult.status === 'fulfilled') {
@@ -487,8 +527,10 @@ export default handler(async (req) => {
       fetched_utc: localResult.status === 'fulfilled' ? localResult.value.cached_utc : new Date().toISOString(),
       local: {
         ...local,
-        fuels: local.fuels.map((fuel) => addIndex(fuel, market)),
+        fuels: local.fuels.map((fuel) => addIndex(fuel, market, region)),
       },
+      region,
+      nearby: nearbyResults.map((result) => (result.status === 'fulfilled' ? result.value : null)).filter(Boolean),
       market,
       sources: [
         { label: 'AirNav airport/FBO fuel prices', url: localSourceUrl },

@@ -1,5 +1,6 @@
 import { Home, Moon, Radio, Sun, Sunrise, Sunset } from 'lucide-react';
 import { lightingPhase } from '../lib/aviation/sun';
+import { ChartLinks } from './ChartLinks';
 import { formatDuration, formatFeet, formatLocal, formatLocalWithZone, formatZulu } from '../lib/format';
 
 function primaryFrequency(airport) {
@@ -21,7 +22,7 @@ function variationText(deg) {
   return `Var ${Math.abs(deg)}°${deg > 0 ? 'E' : 'W'}`;
 }
 
-export function AirportHeader({ airport, image, sun, now, isHome, onToggleHome }) {
+export function AirportHeader({ airport, image, sun, now, isHome, onToggleHome, charts }) {
   const tz = airport?.timezone;
   const freq = primaryFrequency(airport);
   const longest = longestRunway(airport);
@@ -64,6 +65,7 @@ export function AirportHeader({ airport, image, sun, now, isHome, onToggleHome }
           ) : null}
           {chips.map((chip) => <span key={chip} className="chip">{chip}</span>)}
         </div>
+        {airport ? <ChartLinks airport={airport} charts={charts} compact showListen /> : null}
       </div>
 
       <div className="airport-clock" aria-label="Current time">

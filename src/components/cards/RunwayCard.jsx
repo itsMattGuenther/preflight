@@ -1,6 +1,7 @@
 import { Wind } from 'lucide-react';
 import { runwayWinds } from '../../lib/aviation/wind';
 import { formatFeet, formatWind, padHeading } from '../../lib/format';
+import { ChartLinks } from '../ChartLinks';
 import { Card, Notice, Skeleton } from '../ui';
 
 const C = 100;
@@ -103,7 +104,7 @@ function cross(item) {
   return `${steady}${gust != null && gust !== steady ? ` (G${gust})` : ''}`;
 }
 
-export function RunwayCard({ airport, weather, minimums }) {
+export function RunwayCard({ airport, weather, minimums, charts }) {
   const metar = weather.data?.metar;
   if (!airport || weather.isPending) return <Card title="Runways & wind" icon={Wind} className="area-runway"><Skeleton lines={5} /></Card>;
   const runways = airport.runways || [];
@@ -149,6 +150,11 @@ export function RunwayCard({ airport, weather, minimums }) {
             <Notice tone="warning">No runway here meets your limits ({[minimums.paved_only ? 'paved' : null, minimums.min_runway_ft ? `${formatFeet(minimums.min_runway_ft)}+` : null].filter(Boolean).join(', ')}).</Notice>
           )}
         </div>
+      </div>
+
+      <div className="brief-charts">
+        <div className="control-label">Brief before taxi</div>
+        <ChartLinks airport={airport} charts={charts} />
       </div>
 
       <table className="runway-table">

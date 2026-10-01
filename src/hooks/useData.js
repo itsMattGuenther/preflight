@@ -85,11 +85,13 @@ export function useTraffic(airport, enabled = true) {
   });
 }
 
-export function useFuel(icao) {
+export function useFuel(icao, airport, nearby) {
+  // Compare against up to five reporting airports within 40 NM.
+  const nearbyIds = (nearby || []).filter((item) => item.distance_nm <= 40).slice(0, 5).map((item) => item.icao).join(',');
   return useQuery({
-    queryKey: ['fuel', icao],
-    queryFn: () => apiFetch('fuel', { icao }),
-    enabled: Boolean(icao),
+    queryKey: ['fuel', icao, airport?.state, nearbyIds],
+    queryFn: () => apiFetch('fuel', { icao, state: airport?.state, nearby: nearbyIds }),
+    enabled: Boolean(icao && airport),
     staleTime: 60 * MINUTE,
   });
 }
@@ -100,6 +102,16 @@ export function useRadar() {
     queryFn: () => apiFetch('radar'),
     staleTime: 4 * MINUTE,
     refetchInterval: 5 * MINUTE,
+  });
+}
+
+export function useCharts(airport) {
+  const faa = airport?.faa_id || airport?.icao?.replace(/^K(?=[A-Z0-9]{3}$)/, '');
+  return useQuery({
+    queryKey: ['charts', faa],
+    queryFn: () => apiFetch('charts', { faa }),
+    enabled: Boolean(faa),
+    staleTime: 6 * 60 * MINUTE,
   });
 }
 
