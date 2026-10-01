@@ -9,7 +9,6 @@ import { FuelCard } from './components/cards/FuelCard';
 import { HazardsCard } from './components/cards/HazardsCard';
 import { MinimumsCard } from './components/cards/MinimumsCard';
 import { NearbyCard } from './components/cards/NearbyCard';
-import { NotamCard } from './components/cards/NotamCard';
 import { RadarCard } from './components/cards/RadarCard';
 import { RunwayCard } from './components/cards/RunwayCard';
 import { TafCard } from './components/cards/TafCard';
@@ -189,32 +188,47 @@ export default function App() {
           </section>
         ) : (
           <>
-            <AirportHeader airport={airport} image={image.data} sun={sunToday} now={now} isHome={home === airport?.icao} onToggleHome={toggleHome} charts={charts} />
-            <div className="grid">
-              <MinimumsCard
-                evaluation={evaluation}
-                loading={!evaluation}
-                flightWindow={flightWindow}
-                onWindowChange={changeWindow}
-                windowRange={windowRange}
-                minimums={minimums}
-                isExample={isExample}
-                onEdit={() => setEditorOpen(true)}
-                onCopyBriefing={copyBriefing}
-                timeZone={tz}
-              />
-              <ConditionsCard weather={weather} airport={airport} lastSeen={lastSeen} now={now} />
+            <AirportHeader airport={airport} image={image.data} sun={sunToday} now={now} isHome={home === airport?.icao} onToggleHome={toggleHome} />
+            {/* Rows group related cards: the go/no-go picture first, then the
+                forecast, the field itself, traffic, and reference info. */}
+            <div className="rows">
+              <h2 className="section-title">Go / no-go</h2>
+              <div className="row row-lead">
+                <MinimumsCard
+                  evaluation={evaluation}
+                  loading={!evaluation}
+                  flightWindow={flightWindow}
+                  onWindowChange={changeWindow}
+                  windowRange={windowRange}
+                  minimums={minimums}
+                  isExample={isExample}
+                  onEdit={() => setEditorOpen(true)}
+                  onCopyBriefing={copyBriefing}
+                  timeZone={tz}
+                />
+                <ConditionsCard weather={weather} airport={airport} lastSeen={lastSeen} now={now} />
+              </div>
               <TafCard weather={weather} airport={airport} windowRange={windowRange} now={now} />
-              <RunwayCard airport={airport} weather={weather} minimums={minimums} charts={charts} />
-              <HazardsCard airport={airport} tfrs={tfrs} advisories={advisories} now={now} />
-              <NotamCard airport={airport} notams={notams} now={now} />
-              <RadarCard airport={airport} radar={radar} />
-              <TrafficCard airport={airport} traffic={traffic} now={now} />
-              <AirportInfoCard airport={airport} nearby={airportQuery.data?.nearby} />
-              <NearbyCard nearby={airportQuery.data?.nearby} loading={airportQuery.isPending} onSelect={selectAirport} />
-              <DaylightCard airport={airport} sun={sunToday} now={now} />
-              <WindsAloftCard winds={winds} />
-              <FuelCard fuel={fuel} nearby={airportQuery.data?.nearby} onSelect={selectAirport} />
+              <h2 className="section-title">Runway &amp; hazards</h2>
+              <div className="row row-three">
+                <RunwayCard airport={airport} weather={weather} minimums={minimums} charts={charts} />
+                <HazardsCard airport={airport} tfrs={tfrs} advisories={advisories} notams={notams} now={now} />
+                <RadarCard airport={airport} radar={radar} />
+              </div>
+              <h2 className="section-title">Traffic, fuel &amp; frequencies</h2>
+              <div className="row row-wide">
+                <TrafficCard airport={airport} traffic={traffic} now={now} />
+                <NearbyCard nearby={airportQuery.data?.nearby} loading={airportQuery.isPending} onSelect={selectAirport} />
+              </div>
+              <div className="row row-wide">
+                <FuelCard fuel={fuel} nearby={airportQuery.data?.nearby} onSelect={selectAirport} />
+                <AirportInfoCard airport={airport} />
+              </div>
+              <h2 className="section-title">Reference</h2>
+              <div className="row row-two">
+                <WindsAloftCard winds={winds} />
+                <DaylightCard airport={airport} sun={sunToday} now={now} />
+              </div>
             </div>
           </>
         )}

@@ -60,10 +60,9 @@ export function WindsAloftCard({ winds }) {
           ))}
         </tbody>
       </table>
-      <p className="fine-print">
-        For use {forecast.for_use || '--'} · {station.name || station.id}. Directions true.{' '}
-        {fzl === 'below' ? 'Freezing level at or below the lowest level shown.' : fzl ? `Freezing level about ${formatNumber(fzl)} ft MSL.` : ''}
-        {' '}The lowest level is omitted when it is within 1,500 ft of the station.
+      <p className="footnote">
+        {fzl === 'below' ? 'Freezing level at or below the lowest level · ' : fzl ? `Freezing level about ${formatNumber(fzl)} ft MSL · ` : ''}
+        For use {forecast.for_use || '--'} · {station.name || station.id} · directions true
       </p>
     </Card>
   );

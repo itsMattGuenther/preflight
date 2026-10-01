@@ -118,18 +118,16 @@ export function TafCard({ weather, airport, windowRange, now }) {
               {['VFR', 'MVFR', 'IFR', 'LIFR'].map((cat) => (
                 <span key={cat}><i className={`cat-bg-${cat.toLowerCase()}`} />{cat}</span>
               ))}
-              <span><i className="legend-overlay" />Temporary / possible</span>
+              <span>Lower band: TEMPO / PROB</span>
             </div>
           </div>
 
           <ol className="taf-periods">
             {visiblePeriods.map((period) => (
               <li key={`${period.change}-${period.from_utc}-${period.probability}`} className={['TEMPO', 'PROB'].includes(period.change) ? 'overlay' : ''}>
-                <div className="taf-period-head">
-                  <span>{changeLabel(period, tz)}</span>
-                  <CategoryBadge category={displayCategory(taf, period)} size="sm" />
-                </div>
-                <div className="taf-period-body">{conditionsText(period)}</div>
+                <span className="taf-when">{changeLabel(period, tz)}</span>
+                <CategoryBadge category={displayCategory(taf, period)} size="sm" />
+                <span className="taf-what">{conditionsText(period)}</span>
               </li>
             ))}
           </ol>

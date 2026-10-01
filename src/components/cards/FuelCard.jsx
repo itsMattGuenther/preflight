@@ -1,6 +1,6 @@
 import { Fuel } from 'lucide-react';
 import { cardinal, money } from '../../lib/format';
-import { Card, LinkOut, Skeleton } from '../ui';
+import { Card, Skeleton } from '../ui';
 
 function pct(value, min, max) {
   if (value == null || min == null || max == null || max <= min) return null;
@@ -128,10 +128,9 @@ export function FuelCard({ fuel, nearby, onSelect }) {
           )}
         </div>
       </div>
-      <p className="fine-print">
-        Prices are self-reported by FBOs to AirNav and can be days old; call ahead. Ranges and averages come from AirNav&apos;s national fuel report
-        {fuel.data?.region ? ` (FAA ${fuel.data.region} region)` : ''}. Differences in the nearby table are against the cheapest price here.{' '}
-        {local?.source_url ? <LinkOut href={local.source_url}>Prices on AirNav</LinkOut> : null}
+      <p className="footnote">
+        Self-reported to AirNav and can be days old; call ahead.{' '}
+        {local?.source_url ? <a href={local.source_url} target="_blank" rel="noreferrer">Prices on AirNav ↗</a> : null}
       </p>
     </Card>
   );

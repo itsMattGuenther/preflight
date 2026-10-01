@@ -1,4 +1,4 @@
-import { Cloud, History } from 'lucide-react';
+import { Cloud } from 'lucide-react';
 import { useState } from 'react';
 import { densityAltitude } from '../../lib/aviation/density';
 import { describeWeatherGroup, parseWeather, plainEnglishMetar } from '../../lib/aviation/metar';
@@ -146,7 +146,7 @@ export function ConditionsCard({ weather, airport, lastSeen, now }) {
 
       {recent.length ? (
         <div className="trend">
-          <div className="control-label"><History size={12} /> Earlier reports</div>
+          <div className="section-label">Earlier reports</div>
           <table>
             <tbody>
               {recent.map((item) => (
@@ -165,7 +165,7 @@ export function ConditionsCard({ weather, airport, lastSeen, now }) {
 
       {lastSeen ? (
         <div className="last-seen">
-          <div className="control-label">Since you last looked ({formatLocal(lastSeen.previous.seen_utc, tz, 'EEE h:mm a')})</div>
+          <div className="section-label">Since you last looked ({formatLocal(lastSeen.previous.seen_utc, tz, 'EEE h:mm a')})</div>
           {lastSeen.sameReport ? (
             <p className="muted small">No new observation since then.</p>
           ) : lastSeen.changes.length ? (

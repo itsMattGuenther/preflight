@@ -161,7 +161,7 @@ describe('evaluateMinimums', () => {
     const rwy27 = { ...airport, runways: [{ id: '09/27', paved: true, length_ft: 5000, ends: [{ id: '09', heading_true: 90 }, { id: '27', heading_true: 270 }] }] };
     const result = evaluate({ airport: rwy27, metar: metar({ wind_dir_deg: 270, wind_speed_kt: 15, wind_gust_kt: 25, wind_var_from_deg: 220, wind_var_to_deg: 320 }) });
     expect(statusOf(result, 'crosswind')).toBe('fail');
-    expect(result.checks.find((item) => item.id === 'crosswind').value).toMatch(/^19 kt/);
+    expect(result.checks.find((item) => item.id === 'crosswind').value).toMatch(/^19.2 kt/);
   });
 
   it('flags low-level wind shear in the TAF', () => {

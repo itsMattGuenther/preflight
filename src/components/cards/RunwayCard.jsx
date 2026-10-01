@@ -1,6 +1,6 @@
 import { Wind } from 'lucide-react';
 import { runwayWinds } from '../../lib/aviation/wind';
-import { formatFeet, formatWind, padHeading } from '../../lib/format';
+import { formatFeet, formatKnots, formatWind, padHeading } from '../../lib/format';
 import { ChartLinks } from '../ChartLinks';
 import { Card, Notice, Skeleton } from '../ui';
 
@@ -134,9 +134,9 @@ export function RunwayCard({ airport, weather, minimums, charts }) {
                 <div>
                   <dt>Crosswind</dt>
                   <dd>
-                    {Math.round(best.steady.crosswind ?? 0)} kt
+                    {formatKnots(best.steady.crosswind ?? 0)}
                     {best.steady.from ? <small> from {best.steady.from}</small> : null}
-                    {best.gust ? <small> · gusts {Math.round(best.gust.crosswind)} kt</small> : null}
+                    {best.gust ? <small> · gusts {formatKnots(best.gust.crosswind)}</small> : null}
                   </dd>
                 </div>
                 <div><dt>Runway</dt><dd>{formatFeet(best.runway.length_ft)} · {best.runway.surface}</dd></div>
@@ -152,8 +152,8 @@ export function RunwayCard({ airport, weather, minimums, charts }) {
         </div>
       </div>
 
-      <div className="brief-charts">
-        <div className="control-label">Brief before taxi</div>
+      <div className="card-links">
+        <span className="section-label">Charts</span>
         <ChartLinks airport={airport} charts={charts} />
       </div>
 
@@ -173,10 +173,10 @@ export function RunwayCard({ airport, weather, minimums, charts }) {
           ))}
         </tbody>
       </table>
-      <p className="fine-print">
-        Components in knots, gusts in parentheses. METAR wind and these runway headings are both <strong>true</strong>; ATIS/AWOS broadcasts give
-        wind in <strong>magnetic</strong>{airport.magvar_deg != null ? ` (variation here: ${Math.abs(airport.magvar_deg)}°${airport.magvar_deg >= 0 ? 'E' : 'W'})` : ''}.
-        {approximate ? ' Some headings are estimated from runway numbers.' : ''} Diagram is schematic, not to scale.
+      <p className="footnote">
+        Knots; gusts in parentheses. Headings and METAR wind are true; ATIS/AWOS wind is magnetic
+        {airport.magvar_deg != null ? ` (${Math.abs(airport.magvar_deg)}°${airport.magvar_deg >= 0 ? 'E' : 'W'} here)` : ''}.
+        {approximate ? ' Some headings estimated.' : ''}
       </p>
     </Card>
   );

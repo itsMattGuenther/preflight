@@ -9,6 +9,3 @@ export function skyVectorUrl(airport) {
   return `https://skyvector.com/airport/${encodeURIComponent(id)}`;
 }
 
-export function airNavUrl(airport) {
-  return `https://www.airnav.com/airport/${encodeURIComponent(airport?.icao || airport?.faa_id || '')}`;
-}

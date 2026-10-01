@@ -24,6 +24,9 @@ export function MinimumsCard({ evaluation, flightWindow, onWindowChange, windowR
   const verdict = VERDICTS[evaluation?.verdict || 'unknown'];
   const stillLoading = loading || (evaluation?.checks || []).some((item) => item.value === 'Loading…');
   const presetLabel = PRESETS[minimums.preset]?.label;
+  const checks = evaluation?.checks || [];
+  const attention = checks.filter((item) => ['fail', 'caution', 'unknown'].includes(item.status));
+  const passing = checks.filter((item) => !['fail', 'caution', 'unknown'].includes(item.status));
 
   async function copy() {
     const ok = await onCopyBriefing();
@@ -82,31 +85,43 @@ export function MinimumsCard({ evaluation, flightWindow, onWindowChange, windowR
         </div>
       </div>
 
-      <ul className="checks">
-        {(evaluation?.checks || []).map((item) => (
-          <li key={item.id} className={`check check-${item.status}`}>
-            <StatusIcon status={item.status} />
-            <div className="check-body">
-              <div className="check-line">
-                <span className="check-label">{item.label}</span>
-                <span className="check-value">{item.value}</span>
+      {/* Items that need a look come first, with their limit and reason.
+          Everything within limits collapses to a compact label/value list. */}
+      {attention.length ? (
+        <ul className="checks">
+          {attention.map((item) => (
+            <li key={item.id} className={`check check-${item.status}`}>
+              <StatusIcon status={item.status} size={15} />
+              <span className="check-label">{item.label}</span>
+              <span className="check-value">{item.value}</span>
+              <span className="check-detail">
+                {item.limit && item.status !== 'unknown' ? `Limit ${item.limit}` : null}
+                {item.limit && item.status !== 'unknown' && item.note ? ' · ' : null}
+                {item.note}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {passing.length ? (
+        <div className="checks-ok">
+          <div className="section-label">{attention.length ? 'Within your limits' : 'All checks within your limits'}</div>
+          <dl>
+            {passing.map((item) => (
+              <div key={item.id} title={`Limit ${item.limit}${item.note ? ` · ${item.note}` : ''}`}>
+                <dt><StatusIcon status={item.status} size={12} />{item.label}</dt>
+                <dd>{item.value}</dd>
               </div>
-              <div className="check-detail">
-                <span>Limit: {item.limit}</span>
-                {item.note ? <span className="check-note">{item.note}</span> : null}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
+            ))}
+          </dl>
+        </div>
+      ) : null}
 
       {evaluation?.notChecked?.length ? (
-        <div className="not-checked">
-          <div className="control-label">Not checked here</div>
-          <ul>
-            {evaluation.notChecked.map((item) => <li key={item}>{item}</li>)}
-          </ul>
-        </div>
+        <p className="not-checked">
+          <strong>Not checked:</strong> {evaluation.notChecked.join(' · ')}
+        </p>
       ) : null}
 
       <div className="minimums-foot">

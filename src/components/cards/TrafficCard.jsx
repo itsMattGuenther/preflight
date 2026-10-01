@@ -1,6 +1,6 @@
 import { Navigation, RadioTower } from 'lucide-react';
 import { useState } from 'react';
-import { cardinal, formatLocal, formatNumber, timeAgo } from '../../lib/format';
+import { cardinal, formatNumber, timeAgo } from '../../lib/format';
 import { lonLatToWorld, nmToPixels, osmTileUrl, tilesAround, TILE_SIZE } from '../../lib/tiles';
 import { Card, ErrorNote, Segmented, Skeleton } from '../ui';
 
@@ -46,14 +46,15 @@ export function TrafficCard({ airport, traffic, now }) {
       meta={traffic.data ? `Updated ${timeAgo(traffic.data.fetched_utc, now)}` : null}
       action={<Segmented label="Traffic range" options={RANGES} value={range} onChange={setRange} />}
     >
-      <div className="traffic-stats">
-        <div><span>{pattern.length}</span>near the pattern<small>within {PATTERN_NM} NM, below {formatNumber(PATTERN_AGL)} ft AGL</small></div>
-        <div><span>{onGround.length}</span>on the ground<small>within 2 NM</small></div>
-        <div><span>{visible.length}</span>within {range} NM<small>all altitudes</small></div>
-      </div>
+      <p className="stat-line">
+        <span title={`Within ${PATTERN_NM} NM and below ${formatNumber(PATTERN_AGL)} ft AGL`}><strong>{pattern.length}</strong> near the pattern</span>
+        <span title="Within 2 NM"><strong>{onGround.length}</strong> on the ground</span>
+        <span><strong>{visible.length}</strong> within {range} NM</span>
+      </p>
 
       <div className="traffic-layout">
         <div className="map-frame traffic-map">
+          <div className="scope-sweep" aria-hidden="true" />
           {tiles.map((tile) => (
             <img
               key={`${config.zoom}-${tile.x}-${tile.y}`}
@@ -122,9 +123,8 @@ export function TrafficCard({ airport, traffic, now }) {
               {!visible.length ? <tr><td colSpan={5} className="muted">Nothing showing. Not everyone broadcasts ADS-B; keep looking outside.</td></tr> : null}
             </tbody>
           </table>
-          <p className="fine-print">
-            Map tags show altitude in hundreds of feet MSL; the table shows height above the field. ADS-B coverage near the ground is
-            incomplete and positions can lag. {traffic.data ? `Last update ${formatLocal(traffic.data.fetched_utc, airport.timezone, 'h:mm:ss a')}.` : ''}
+          <p className="footnote">
+            Map tags: altitude in hundreds of feet MSL. Table: height above the field. ADS-B can lag, and not every aircraft broadcasts.
           </p>
         </div>
       </div>

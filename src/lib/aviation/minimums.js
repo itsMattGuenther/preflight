@@ -4,7 +4,7 @@
 // exactly why the summary says what it says. It is a decision aid that
 // supports, and never replaces, a full briefing and pilot judgment.
 
-import { formatFeet, formatVisibility, padHeading } from '../format.js';
+import { formatFeet, formatKnots, formatVisibility, padHeading } from '../format.js';
 import { densityAltitude } from './density.js';
 import { weatherHazards } from './metar.js';
 import { tafConditionsInWindow, tafCoverage } from './taf.js';
@@ -152,14 +152,14 @@ export function evaluateMinimums({
     return {
       verdict: 'unknown',
       checks: [],
-      notChecked: ['Weather: no current observation or forecast covers this window'],
+      notChecked: ['Weather (no observation or forecast covers this window)'],
     };
   }
 
   const futureOnly = startMs > now + 45 * 60 * 1000;
   const coverage = tafCoverage(taf, Math.max(startMs, now), endMs);
-  if (!taf) notChecked.push('Forecast: no TAF within 40 NM, so only current conditions were checked');
-  else if (coverage < 0.99 && endMs > now) notChecked.push('Forecast: the TAF does not cover your whole flight window');
+  if (!taf) notChecked.push('Forecast (no TAF within 40 NM)');
+  else if (coverage < 0.99 && endMs > now) notChecked.push('End of your flight window (past the TAF)');
 
   checks.push(evaluateNumeric({
     id: 'ceiling', label: 'Ceiling', sets, getValue: unlimitedCeiling, limit: m.ceiling_ft, type: 'min', marginPct: margin,
@@ -220,7 +220,7 @@ export function evaluateMinimums({
       const candidate = {
         ...check('crosswind', 'Crosswind', `${m.crosswind_kt} kt max`),
         status,
-        value: `${Math.round(value)} kt · RWY ${best.id}${tail}`,
+        value: `${formatKnots(value)} · RWY ${best.id}${tail}`,
         note: `${set.label}${variable ? ' · variable wind, worst case assumed' : ''}${best.gust ? ' · gusts included' : ''}`,
       };
       if (STATUS_RANK[status] > STATUS_RANK[crosswind.status] || (STATUS_RANK[status] === STATUS_RANK[crosswind.status] && value > crossRaw) || crosswind.status === 'unknown') {
@@ -363,7 +363,7 @@ export function evaluateMinimums({
 
   // NOTAMs.
   if (!notams || notams.configured === false) {
-    notChecked.push('NOTAMs: not available in Preflight, check the FAA NOTAM Search');
+    notChecked.push('NOTAMs (read them in the FAA NOTAM Search)');
   } else {
     const closures = (notams.notams || []).filter((notam) => classifyNotam(notam) === 'closure' && isActiveDuring(notam, startMs, endMs));
     const airportClosed = closures.find((notam) => /\b(AD|AP)\b[^.]*\bCLSD\b|\bAIRPORT CLOSED\b/.test(String(notam.text).toUpperCase()));
@@ -379,7 +379,7 @@ export function evaluateMinimums({
     } else {
       checks.push({ ...base, value: 'None during window', note: 'Still read every NOTAM before flight' });
     }
-    if (notams.stale) notChecked.push('NOTAMs: FAA feed did not respond; showing an older copy');
+    if (notams.stale) notChecked.push('Current NOTAMs (FAA feed not responding)');
   }
 
   // Observation freshness and source.

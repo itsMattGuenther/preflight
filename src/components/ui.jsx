@@ -1,13 +1,14 @@
-import { AlertTriangle, CheckCircle2, CircleHelp, ExternalLink, Info, X, XOctagon } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleHelp, Info, X, XOctagon } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { CATEGORY_INFO } from '../lib/aviation/flightCategory';
 
-export function Card({ title, icon: Icon, meta, action, children, className = '', id }) {
+// Card titles are plain text labels: icons on every card were decoration
+// competing with the data. (`icon` is accepted but not rendered.)
+export function Card({ title, meta, action, children, className = '', id }) {
   return (
     <section className={`card ${className}`} id={id} aria-label={typeof title === 'string' ? title : undefined}>
       <header className="card-head">
         <div className="card-title">
-          {Icon ? <Icon size={15} aria-hidden="true" /> : null}
           <h2>{title}</h2>
         </div>
         <div className="card-head-right">
@@ -42,14 +43,6 @@ export function StatusIcon({ status, size = 16 }) {
   return <Icon size={size} className={`status-icon status-${status}`} aria-label={status} />;
 }
 
-export function LinkOut({ href, children, className = '' }) {
-  return (
-    <a className={`link-out ${className}`} href={href} target="_blank" rel="noreferrer">
-      {children}
-      <ExternalLink size={11} aria-hidden="true" />
-    </a>
-  );
-}
 
 export function Skeleton({ lines = 3 }) {
   return (

@@ -118,6 +118,12 @@ export function formatWindShort({ wind_dir_deg: dir, wind_vrb: vrb, wind_speed_k
   return `${vrb || dir == null ? 'VRB' : padHeading(dir)}@${speed}${gust ? `G${gust}` : ''}`;
 }
 
+export function formatKnots(value) {
+  if (value == null || !Number.isFinite(Number(value))) return '--';
+  const rounded = Math.round(Number(value) * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} kt`;
+}
+
 export function cardinal(deg) {
   if (deg == null) return '';
   const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
