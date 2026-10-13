@@ -2,6 +2,14 @@
   command = "npm run build"
   publish = "dist"
   functions = "netlify/functions"
+  # Every production deploy costs 15 of the Netlify team's 300 credits a month,
+  # so skip the build when a commit changes nothing the site is made from: only
+  # docs and README images, LICENSE, tests, lint and git config, scripts/, or
+  # this file. (A change to only this file goes live with the next change to
+  # the site. scripts/ regenerates public/data, and that data change builds.)
+  # Netlify cancels the build when this exits 0; on a first build, a rebuild of
+  # the same commit, or any git error, it exits non-zero and the build goes ahead.
+  ignore = "test -n \"$CACHED_COMMIT_REF\" && test \"$CACHED_COMMIT_REF\" != \"$COMMIT_REF\" && git diff --quiet \"$CACHED_COMMIT_REF\" \"$COMMIT_REF\" -- . ':!*.md' ':!docs' ':!LICENSE' ':!screenshot.png' ':!logo_LARGE.png' ':!logo_SMALL.png' ':!*.test.js' ':!eslint.config.js' ':!.env.example' ':!.gitignore' ':!.gitattributes' ':!.github' ':!scripts' ':!netlify.toml'"
 
 [build.environment]
   NODE_VERSION = "22"
