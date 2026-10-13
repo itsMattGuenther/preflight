@@ -1,66 +1,64 @@
-import { getStore } from '@netlify/blobs';
-import { requireAuth, json } from './_auth.js';
+import { cached } from '../lib/cache.js';
+import { fetchWithTimeout, handler, json, normalizeIcao, badRequest } from '../lib/http.js';
 
 const NOTAM_URL = 'https://external-api.faa.gov/notamapi/v1/notams';
+const PAGE_SIZE = 250;
 
-function normalizeNotam(item) {
-  // The FAA NOTAM API has changed response shapes over time. Check several
-  // likely fields and return one stable shape to the UI.
-  const text = item.icaoMessage || item.traditionalMessage || item.text || item.summary || item.raw || '';
+export function normalizeNotam(item) {
+  // The FAA API returns GeoJSON features with the NOTAM nested under
+  // properties.coreNOTAMData.notam; older/alternate shapes are flat.
+  const notam = item?.properties?.coreNOTAMData?.notam || item || {};
+  const translations = item?.properties?.coreNOTAMData?.notamTranslation || [];
+  const domestic = translations.find((entry) => entry.type === 'LOCAL_FORMAT')?.simpleText;
+  const text = String(notam.text || domestic || notam.icaoMessage || notam.traditionalMessage || notam.summary || '').trim();
   return {
-    id: item.notamNumber || item.id || item.number || 'unknown',
-    classification: item.classification || item.notamType || item.type || '',
-    summary: item.summary || item.icaoMessage || text.split('\n')[0] || '',
-    raw: text,
-    effective_from_utc: item.effectiveStart || item.startDate || item.effective_from_utc || null,
-    effective_to_utc: item.effectiveEnd || item.endDate || item.effective_to_utc || null,
+    id: notam.number || notam.id || notam.notamNumber || null,
+    type: notam.type || null,
+    classification: notam.classification || null,
+    location: notam.location || notam.icaoLocation || null,
+    text,
+    domestic: domestic ? String(domestic).trim() : null,
+    issued_utc: notam.issued || null,
+    effective_from_utc: notam.effectiveStart || null,
+    effective_to_utc: notam.effectiveEnd && notam.effectiveEnd !== 'PERM' ? notam.effectiveEnd : null,
+    permanent: notam.effectiveEnd === 'PERM',
   };
 }
 
-async function cachedResult(store, icao) {
-  return store.get(`notams_${icao}`, { type: 'json' });
+async function loadNotams(icao, clientId, clientSecret) {
+  const res = await fetchWithTimeout(`${NOTAM_URL}?icaoLocation=${icao}&pageSize=${PAGE_SIZE}&sortBy=effectiveStartDate&sortOrder=Desc`, {
+    headers: { client_id: clientId, client_secret: clientSecret, Accept: 'application/json' },
+    timeoutMs: 9000,
+  });
+  if (!res.ok) throw new Error(`FAA NOTAM API returned ${res.status}`);
+  const body = await res.json();
+  const records = body.items || body.notams || body.content || (Array.isArray(body) ? body : []);
+  const now = Date.now();
+  const notams = records
+    .map(normalizeNotam)
+    .filter((notam) => notam.text)
+    .filter((notam) => !notam.effective_to_utc || Date.parse(notam.effective_to_utc) > now);
+  return { notams, total: body.totalCount ?? notams.length };
 }
 
-export default async (req) => {
-  const auth = requireAuth(req.headers);
-  if (!auth.ok) return json({ error: auth.message }, { status: auth.status });
+export default handler(async (req) => {
+  const icao = normalizeIcao(new URL(req.url).searchParams.get('icao'));
+  if (!icao) return badRequest('icao is required');
 
-  const url = new URL(req.url);
-  const icao = (url.searchParams.get('icao') || 'KVBT').toUpperCase();
-  const store = getStore({ name: 'config' });
   const clientId = process.env.FAA_NOTAM_CLIENT_ID;
   const clientSecret = process.env.FAA_NOTAM_CLIENT_SECRET;
-
   if (!clientId || !clientSecret) {
-    // Local/dev deployments may not have FAA credentials. Cached data is better
-    // than an empty panel when available, but mark it stale for the UI.
-    const cached = await cachedResult(store, icao);
-    if (cached) return json({ ...cached, stale: true });
-    return json({ fetched_utc: new Date().toISOString(), count: 0, notams: [], warning: 'FAA NOTAM credentials are not configured' });
+    // Say so explicitly. The UI must never present "no data" as "no NOTAMs".
+    return json({ configured: false, fetched_utc: new Date().toISOString(), notams: [] });
   }
 
-  try {
-    const res = await fetch(`${NOTAM_URL}?icaoLocation=${icao}&pageSize=20`, {
-      headers: {
-        client_id: clientId,
-        client_secret: clientSecret,
-      },
-    });
-    if (!res.ok) throw new Error(`FAA NOTAM API returned ${res.status}`);
-    const body = await res.json();
-    // Accept array and paginated response shapes so a minor FAA envelope change
-    // does not break the panel outright.
-    const records = body.items || body.notams || body.content || (Array.isArray(body) ? body : []);
-    const payload = {
-      fetched_utc: new Date().toISOString(),
-      count: records.length,
-      notams: records.map(normalizeNotam),
-    };
-    await store.setJSON(`notams_${icao}`, payload);
-    return json(payload);
-  } catch (error) {
-    const cached = await cachedResult(store, icao);
-    if (cached) return json({ ...cached, stale: true, error: error.message });
-    return json({ error: error.message }, { status: 502 });
-  }
-};
+  const { value, cached_utc, stale, error } = await cached(`notams/v2/${icao}`, 10 * 60 * 1000, () => loadNotams(icao, clientId, clientSecret), { maxStaleMs: 2 * 60 * 60 * 1000 });
+  return json({
+    configured: true,
+    fetched_utc: cached_utc,
+    stale,
+    error: error || null,
+    total: value.total,
+    notams: value.notams,
+  });
+});

@@ -2,6 +2,17 @@
   command = "npm run build"
   publish = "dist"
   functions = "netlify/functions"
+  # Every production deploy costs 15 of the Netlify team's 300 credits a month,
+  # so skip the build when a commit changes nothing the site is made from: only
+  # docs and README images, LICENSE, tests, lint and git config, scripts/, or
+  # this file. (A change to only this file goes live with the next change to
+  # the site. scripts/ regenerates public/data, and that data change builds.)
+  # Netlify cancels the build when this exits 0; on a first build, a rebuild of
+  # the same commit, or any git error, it exits non-zero and the build goes ahead.
+  ignore = "test -n \"$CACHED_COMMIT_REF\" && test \"$CACHED_COMMIT_REF\" != \"$COMMIT_REF\" && git diff --quiet \"$CACHED_COMMIT_REF\" \"$COMMIT_REF\" -- . ':!*.md' ':!docs' ':!LICENSE' ':!screenshot.png' ':!logo_LARGE.png' ':!logo_SMALL.png' ':!*.test.js' ':!eslint.config.js' ':!.env.example' ':!.gitignore' ':!.gitattributes' ':!.github' ':!scripts' ':!netlify.toml'"
+
+[build.environment]
+  NODE_VERSION = "22"
 
 [functions]
   node_bundler = "esbuild"
@@ -11,9 +22,27 @@
   targetPort = 5173
   port = 8888
 
+# Airport pages are client-side routes (/KVBT). Functions under
+# /.netlify/functions/* are matched before this rule.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+[[headers]]
+  for = "/data/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

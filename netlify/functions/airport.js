@@ -1,70 +1,33 @@
-import { requireAuth, json } from './_auth.js';
+import tzlookup from '@photostructure/tz-lookup';
+import {
+  frequencyKind,
+  parseAwcFrequencies,
+  parseMagVar,
+  runwaysFromAwc,
+  runwaysFromFallback,
+  splitAwcName,
+} from '../lib/airportData.js';
+import { cached, TTL_OVERRIDE } from '../lib/cache.js';
+import fallbackAirports from '../lib/data/airports-fallback.json';
+import { bearingDeg, distanceNm, round1 } from '../lib/geo.js';
+import { fetchJson, fetchText, handler, json, normalizeIcao, badRequest } from '../lib/http.js';
 
 const API_BASE = 'https://aviationweather.gov/api/data';
+const AIRPORT_TTL_MS = 24 * 60 * 60 * 1000;
+// If AviationWeather's airport record failed to load, the result (built from
+// station info / OurAirports) is cached briefly so the full FAA record is
+// picked up soon, rather than a degraded copy sticking for a day.
+const DEGRADED_TTL_MS = 15 * 60 * 1000;
 
-async function fetchJson(url) {
-  const res = await fetch(url, {
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': 'preflight-dashboard/1.0',
-    },
-  });
-  if (res.status === 204) return [];
-  if (!res.ok) throw new Error(`${res.status} ${url}`);
-  const text = await res.text();
-  return text ? JSON.parse(text) : [];
-}
-
-async function fetchText(url) {
-  const res = await fetch(url, {
-    headers: {
-      Accept: 'text/html,text/plain',
-      'User-Agent': 'preflight-dashboard/1.0',
-    },
-  });
-  if (!res.ok) throw new Error(`${res.status} ${url}`);
-  return res.text();
-}
-
-function normalizeIcao(value) {
-  // Prefix simple three-letter US airport IDs for APIs that expect ICAO, but
-  // keep alphanumeric public airport IDs such as 7M5 intact.
-  const input = String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (/^[A-Z]{3}$/.test(input)) return `K${input}`;
-  return input || 'KVBT';
-}
-
-function distanceNm(a, b) {
-  const rad = Math.PI / 180;
-  const lat1 = a.lat * rad;
-  const lat2 = b.lat * rad;
-  const dLat = (b.lat - a.lat) * rad;
-  const dLon = (b.lon - a.lon) * rad;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-  return 3440.065 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-function bearingDeg(a, b) {
-  const rad = Math.PI / 180;
-  const lat1 = a.lat * rad;
-  const lat2 = b.lat * rad;
-  const dLon = (b.lon - a.lon) * rad;
-  const y = Math.sin(dLon) * Math.cos(lat2);
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-  return Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
-}
-
-function runwayEndHeading(id, fallback) {
-  // AviationWeather runways are physical pairs (18/36). Use the first runway
-  // number to estimate one end's magnetic heading, then derive the reciprocal.
-  const primary = String(id || '').split('/')[0];
-  const numeric = Number(primary.replace(/[^\d]/g, ''));
-  if (Number.isFinite(numeric) && numeric > 0) return numeric === 36 ? 360 : numeric * 10;
-  return Number(fallback) || 0;
-}
-
-function oppositeHeading(heading) {
-  return ((Number(heading) + 180 - 1) % 360) + 1;
+function fallbackRecord(id) {
+  // OurAirports keys small fields by their FAA id (7M5) and others by ICAO.
+  const candidates = [id, id.replace(/^K(?=[A-Z0-9]{3}$)/, '')];
+  for (const key of candidates) {
+    const record = fallbackAirports[key];
+    if (record?.alias) return { id: record.alias, ...fallbackAirports[record.alias] };
+    if (record) return { id: key, ...record };
+  }
+  return null;
 }
 
 function decodeHtml(value) {
@@ -89,244 +52,210 @@ function htmlToText(html) {
     .trim();
 }
 
-function normalizeFrequencyLabel(label) {
-  return String(label || '')
-    .replace(/\s+/g, ' ')
-    .replace(/^WX\s+/i, 'WX ')
-    .trim()
-    .toUpperCase();
-}
+const VHF_PATTERN = /\b1(?:1[89]|2\d|3[0-6])\.\d{1,3}\b/;
 
-function parseAviationWeatherFreqs(freqs) {
-  const raw = String(freqs || '').trim();
-  if (!raw || raw === '-') return [];
-  return raw
-    .split(';')
-    .map((item) => {
-      const parts = item.split(',').map((part) => part.trim()).filter(Boolean);
-      if (!parts.length) return null;
-      return {
-        label: normalizeFrequencyLabel(parts[0]),
-        value: parts.slice(1).join(', ') || parts[0],
-      };
-    })
-    .filter(Boolean);
-}
-
-function parseAirnavFrequencies(html) {
-  // AirNav is used only as a communications fallback. The parser narrows to the
-  // Airport Communications section so nearby weather stations are not mistaken
-  // for CTAF/tower frequencies.
-  const text = htmlToText(html);
-  const section = text.match(/Airport Communications([\s\S]*?)(?:Nearby radio navigation aids|Airport Services|Runway Information|Instrument Procedures|Airport Operational Statistics)/i)?.[1] || '';
-  if (!section) return [];
-
-  const frequencyPattern = /\b1(?:1[89]|2\d|3[0-6])\.\d{1,3}\b/;
-  const lines = section.split('\n').map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
-  const compact = section.replace(/\s+/g, ' ').trim();
-  const rows = [];
-  const uniqueRows = (items) => {
-    const seen = new Set();
-    return items.filter((row) => {
-      const key = `${row.label}:${row.value}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  };
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const lineMatch = lines[index].match(/^([A-Z][A-Z0-9 /&().-]{1,64}?):\s*(.*)$/i);
-    if (!lineMatch) continue;
-    const label = normalizeFrequencyLabel(lineMatch[1]);
-    const value = (lineMatch[2] || lines[index + 1] || '').replace(/\s+/g, ' ').trim();
-    const isNearbyWeather = /\bat\s+[A-Z0-9]{3,4}\b/i.test(label);
-    if (frequencyPattern.test(value) && !isNearbyWeather) {
-      rows.push({
-        label,
-        value: value.slice(0, 120),
-      });
-    }
-  }
-  if (rows.length) return uniqueRows(rows);
-
-  const rowPattern = /([A-Z][A-Z0-9 /&().-]{1,64}?):\s*([\s\S]*?)(?=\s+[A-Z][A-Z0-9 /&().-]{1,64}?:|$)/g;
-  let match = rowPattern.exec(compact);
-  while (match) {
-    const label = normalizeFrequencyLabel(match[1]);
-    const value = match[2].replace(/\s+/g, ' ').trim();
-    const hasVhfFrequency = frequencyPattern.test(value);
-    const isNearbyWeather = /\bat\s+[A-Z0-9]{3,4}\b/i.test(label);
-    if (hasVhfFrequency && !isNearbyWeather) {
-      rows.push({
-        label,
-        value: value.slice(0, 120),
-      });
-    }
-    match = rowPattern.exec(compact);
-  }
-
-  return uniqueRows(rows);
+function frequencyRow(label, value) {
+  const cleanLabel = String(label || '').replace(/\s+/g, ' ').replace(/:$/, '').trim().toUpperCase();
+  return { label: cleanLabel, value: String(value || '').replace(/\s+/g, ' ').trim().slice(0, 120), kind: frequencyKind(cleanLabel) };
 }
 
 function parseSkyVectorFrequencies(html) {
-  // SkyVector's communications table is more structured when present, so try it
-  // before falling back to AirNav's plain text section parser.
+  // SkyVector's communications table mirrors the FAA Chart Supplement.
   const table = String(html || '').match(/<table[^>]+id=["']aptcomms["'][^>]*>([\s\S]*?)<\/table>/i)?.[1] || '';
-  if (!table) return [];
   const rows = [];
-  const frequencyPattern = /\b1(?:1[89]|2\d|3[0-6])\.\d{1,3}\b/;
   const rowPattern = /<tr[\s\S]*?<th[^>]*>([\s\S]*?):?<\/th>\s*<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<\/tr>/gi;
   let match = rowPattern.exec(table);
   while (match) {
-    const label = normalizeFrequencyLabel(htmlToText(match[1]).replace(/:$/, ''));
-    const value = htmlToText(match[2]).replace(/\s+/g, ' ').trim();
-    const isNearbyWeather = /\bat\s+[A-Z0-9]{3,4}\b/i.test(label);
-    if (frequencyPattern.test(value) && !isNearbyWeather) {
-      rows.push({ label, value });
-    }
+    const row = frequencyRow(htmlToText(match[1]), htmlToText(match[2]));
+    if (VHF_PATTERN.test(row.value) && !/\bat\s+[A-Z0-9]{3,4}\b/i.test(row.label)) rows.push(row);
     match = rowPattern.exec(table);
   }
   return rows;
 }
 
-function normalizeAirport(airport, station, icao) {
-  // Merge two AviationWeather feeds into the shape the React cards expect.
-  // airport has runways/services; stationinfo is often better for lat/lon/site.
-  const source = airport || station || {};
-  const lat = Number(source.lat);
-  const lon = Number(source.lon);
-  const runways = Array.isArray(airport?.runways)
-    ? airport.runways.map((runway) => {
-        const heading = runwayEndHeading(runway.id, runway.alignment);
-        const [length_ft, width_ft] = String(runway.dimension || '').split('x').map((value) => Number(value));
-        return {
-          id: runway.id,
-          length_ft: Number.isFinite(length_ft) ? length_ft : null,
-          width_ft: Number.isFinite(width_ft) ? width_ft : null,
-          surface: runway.surface || null,
-          headings: [heading, oppositeHeading(heading)],
-        };
-      })
-    : [];
-
-  return {
-    icao: airport?.icaoId || station?.icaoId || icao,
-    faa_id: airport?.faaId || station?.faaId || null,
-    iata_id: airport?.iataId && airport.iataId !== '-' ? airport.iataId : station?.iataId || null,
-    name: (airport?.name || station?.site || airport?.icaoId || icao).trim(),
-    city: station?.site || airport?.name?.split('/')?.[0]?.trim() || '',
-    state: airport?.state || station?.state || '',
-    country: airport?.country || station?.country || '',
-    lat: Number.isFinite(lat) ? lat : null,
-    lon: Number.isFinite(lon) ? lon : null,
-    elevation_ft: airport?.elev != null
-      ? Math.round(Number(airport.elev) * 3.28084)
-      : station?.elev != null
-        ? Math.round(Number(station.elev) * 3.28084)
-        : null,
-    towered: airport?.tower === 'T',
-    services: airport?.services || null,
-    beacon: airport?.beacon || null,
-    freqs: airport?.freqs || '-',
-    frequencies: parseAviationWeatherFreqs(airport?.freqs),
-    runways,
-    source: airport?.source || 'AviationWeather',
-  };
+function parseAirnavFrequencies(html) {
+  // AirNav's "Airport Communications" section, narrowed so nearby stations'
+  // weather frequencies are not mistaken for this airport's CTAF/tower.
+  const text = htmlToText(html);
+  const section = text.match(/Airport Communications([\s\S]*?)(?:Nearby radio navigation aids|Airport Services|Runway Information|Instrument Procedures|Airport Operational Statistics)/i)?.[1] || '';
+  const rows = [];
+  const seen = new Set();
+  const lines = section.split('\n').map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  lines.forEach((line, index) => {
+    const lineMatch = line.match(/^([A-Z][A-Z0-9 /&().-]{1,64}?):\s*(.*)$/i);
+    if (!lineMatch) return;
+    const row = frequencyRow(lineMatch[1], lineMatch[2] || lines[index + 1] || '');
+    const key = `${row.label}:${row.value}`;
+    if (VHF_PATTERN.test(row.value) && !/\bat\s+[A-Z0-9]{3,4}\b/i.test(row.label) && !seen.has(key)) {
+      seen.add(key);
+      rows.push(row);
+    }
+  });
+  return rows;
 }
 
-async function frequencyFallback(airport) {
-  // Data flow: if AviationWeather provides no useful comms, try public airport
-  // reference pages and record which provider supplied the fallback.
-  const id = airport?.icao || airport?.faa_id;
-  if (!id) return null;
-  const skyVectorId = airport?.faa_id || airport?.icao?.replace(/^K/, '') || id;
+async function scrapedFrequencies(icao, faaId) {
+  // Fallback when AviationWeather lists no frequencies (common at non-towered
+  // fields). Results are cached with the airport for 24 hours, so this runs
+  // roughly once per airport per day rather than on every page view.
+  const id = faaId || icao.replace(/^K/, '');
   const providers = [
-    {
-      label: 'SkyVector airport communications',
-      url: `https://skyvector.com/airport/${encodeURIComponent(skyVectorId)}`,
-      parse: parseSkyVectorFrequencies,
-    },
-    {
-      label: 'AirNav airport communications',
-      url: `https://www.airnav.com/airport/${encodeURIComponent(id)}`,
-      parse: parseAirnavFrequencies,
-    },
+    { label: 'SkyVector (FAA Chart Supplement data)', url: `https://skyvector.com/airport/${encodeURIComponent(id)}`, parse: parseSkyVectorFrequencies },
+    { label: 'AirNav (FAA data)', url: `https://www.airnav.com/airport/${encodeURIComponent(icao)}`, parse: parseAirnavFrequencies },
   ];
-
   for (const provider of providers) {
     try {
-      const html = await fetchText(provider.url);
-      const frequencies = provider.parse(html);
+      const frequencies = provider.parse(await fetchText(provider.url, { timeoutMs: 4500, retries: 0 }));
       if (frequencies.length) return { frequencies, source: { label: provider.label, url: provider.url } };
     } catch {
-      // Try the next public airport reference source.
+      // Try the next provider.
     }
   }
   return null;
 }
 
-async function alternatesFor(airport) {
-  // Find nearby reporting stations, compute distance/bearing, then enrich the
-  // top candidates with METAR category and wind for the alternates card.
-  if (!airport.lat || !airport.lon) return [];
-  const delta = 0.65;
-  const bbox = `${airport.lat - delta},${airport.lon - delta},${airport.lat + delta},${airport.lon + delta}`;
-  const stations = await fetchJson(`${API_BASE}/stationinfo?bbox=${encodeURIComponent(bbox)}&format=json`).catch(() => []);
-  const nearby = (Array.isArray(stations) ? stations : [])
-    .filter((station) => station.icaoId && station.icaoId !== airport.icao && Number.isFinite(Number(station.lat)) && Number.isFinite(Number(station.lon)))
+async function nearbyStations(center, selfId) {
+  const delta = 0.75;
+  const bbox = `${center.lat - delta},${center.lon - delta},${center.lat + delta},${center.lon + delta}`;
+  const stations = await fetchJson(`${API_BASE}/stationinfo?bbox=${bbox}&format=json`).catch(() => []);
+  return (Array.isArray(stations) ? stations : [])
+    .filter((station) => station.icaoId && station.icaoId !== selfId && Number.isFinite(Number(station.lat)) && Number.isFinite(Number(station.lon)))
     .map((station) => {
       const point = { lat: Number(station.lat), lon: Number(station.lon) };
       return {
         icao: station.icaoId,
         name: station.site,
         state: station.state,
-        distance_nm: Math.round(distanceNm(airport, point) * 10) / 10,
-        bearing_deg: bearingDeg(airport, point),
+        lat: point.lat,
+        lon: point.lon,
+        distance_nm: round1(distanceNm(center, point)),
+        bearing_deg: bearingDeg(center, point),
+        has_metar: (station.siteType || []).includes('METAR'),
+        has_taf: (station.siteType || []).includes('TAF'),
       };
     })
     .sort((a, b) => a.distance_nm - b.distance_nm)
-    .slice(0, 6);
-
-  if (!nearby.length) return [];
-  const metars = await fetchJson(`${API_BASE}/metar?ids=${nearby.map((item) => item.icao).join(',')}&format=json&taf=false`).catch(() => []);
-  const metarById = new Map((Array.isArray(metars) ? metars : []).map((metar) => [metar.icaoId, metar]));
-  return nearby.map((alternate) => ({
-    ...alternate,
-    flight_category: metarById.get(alternate.icao)?.fltCat || null,
-    wind_kt: metarById.get(alternate.icao)?.wspd == null ? null : Number(metarById.get(alternate.icao).wspd),
-  }));
+    .slice(0, 8);
 }
 
-export default async (req) => {
-  const auth = requireAuth(req.headers);
-  if (!auth.ok) return json({ error: auth.message }, { status: auth.status });
+async function loadAirport(icao) {
+  const early = fallbackRecord(icao);
+  let awcFailed = false;
+  // Everything that does not depend on another response runs in parallel;
+  // when OurAirports already knows the location, the nearby-station lookup
+  // starts immediately too.
+  const [airports, stations, earlyNearby] = await Promise.all([
+    fetchJson(`${API_BASE}/airport?ids=${icao}&format=json`, { timeoutMs: 6000 }).catch(() => {
+      awcFailed = true;
+      return [];
+    }),
+    fetchJson(`${API_BASE}/stationinfo?ids=${icao}&format=json`, { timeoutMs: 6000 }).catch(() => []),
+    early?.la != null ? nearbyStations({ lat: early.la, lon: early.lo }, icao) : Promise.resolve(null),
+  ]);
+  const awc = Array.isArray(airports) ? airports[0] : null;
+  const station = Array.isArray(stations) ? stations[0] : null;
+  const fallback = early || (awc?.faaId ? fallbackRecord(awc.faaId) : null);
 
+  const lat = Number(awc?.lat ?? station?.lat ?? fallback?.la);
+  const lon = Number(awc?.lon ?? station?.lon ?? fallback?.lo);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || (lat === 0 && lon === 0)) return null;
+
+  const magVar = parseMagVar(awc?.magdec);
+  const awcRunways = runwaysFromAwc(awc?.runways, magVar);
+  const fallbackRunways = runwaysFromFallback(fallback?.r, magVar);
+  // FAA data is authoritative when present; OurAirports only fills in fields
+  // AviationWeather does not cover (it can list runways the FAA has removed).
+  const runways = awcRunways.length ? awcRunways : fallbackRunways;
+
+  const awcName = splitAwcName(awc?.name || station?.site);
+  const elevationM = awc?.elev ?? station?.elev;
+  const id = awc?.icaoId || station?.icaoId || fallback?.id || icao;
+  const faaId = awc?.faaId || station?.faaId || (fallback?.id && !/^K[A-Z]{3}$/.test(fallback.id) ? fallback.id : id.replace(/^K(?=[A-Z]{3}$)/, ''));
+
+  let frequencies = parseAwcFrequencies(awc?.freqs);
+  let frequencySource = frequencies.length ? { label: 'FAA via AviationWeather.gov', url: 'https://aviationweather.gov/' } : null;
+  const needScrape = !frequencies.length || !frequencies.some((item) => ['ctaf', 'tower', 'unicom'].includes(item.kind));
+  const [scraped, nearby] = await Promise.all([
+    needScrape ? scrapedFrequencies(id, faaId) : Promise.resolve(null),
+    earlyNearby || nearbyStations({ lat, lon }, id),
+  ]);
+  if (scraped) {
+    frequencies = scraped.frequencies;
+    frequencySource = scraped.source;
+  }
+
+  let timezone = null;
+  try {
+    timezone = tzlookup(lat, lon);
+  } catch {
+    timezone = null;
+  }
+
+  const towerKnown = awc ? awc.tower === 'T' : null;
+  return {
+    airport: {
+      icao: id,
+      faa_id: faaId,
+      name: fallback?.n || awcName.name || id,
+      city: fallback?.c || awcName.city || '',
+      state: awc?.state || station?.state || fallback?.s || '',
+      country: awc?.country || station?.country || 'US',
+      lat,
+      lon,
+      elevation_ft: elevationM != null ? Math.round(Number(elevationM) * 3.28084) : fallback?.e ?? null,
+      magvar_deg: magVar,
+      timezone,
+      towered: towerKnown ?? (frequencies.length ? frequencies.some((item) => item.kind === 'tower') : null),
+      beacon: awc ? awc.beacon === 'B' : null,
+      has_metar: (station?.siteType || []).includes('METAR'),
+      has_taf: (station?.siteType || []).includes('TAF'),
+      runways,
+      frequencies,
+      frequency_source: frequencySource,
+      data_source: awc ? 'FAA via AviationWeather.gov' : 'OurAirports (verify in Chart Supplement)',
+    },
+    nearby: nearby.filter((item) => item.icao !== id),
+    degraded: awcFailed,
+  };
+}
+
+export default handler(async (req) => {
   const url = new URL(req.url);
   const icao = normalizeIcao(url.searchParams.get('icao'));
-  // Fetch airport and station info together. They are complementary feeds, and
-  // normalizing after both return gives the UI one stable airport object.
-  const [airports, stations] = await Promise.all([
-    fetchJson(`${API_BASE}/airport?ids=${icao}&format=json`),
-    fetchJson(`${API_BASE}/stationinfo?ids=${icao}&format=json`),
-  ]);
-  const airport = normalizeAirport(airports[0], stations[0], icao);
-  if (!airport.lat || !airport.lon) return json({ error: `Airport ${icao} was not found` }, { status: 404 });
-  const fallback = airport.frequencies.length ? null : await frequencyFallback(airport);
-  if (fallback) {
-    airport.frequencies = fallback.frequencies;
-    airport.frequency_source = fallback.source.label;
-  }
-  const sources = [{ label: 'Airport/station data', url: 'https://aviationweather.gov/data/api/' }];
-  if (fallback?.source) sources.push(fallback.source);
+  if (!icao || icao.length < 3) return badRequest('A 3-5 character airport identifier is required');
+
+  const { value, cached_utc } = await cached(`airport/v2/${icao}`, AIRPORT_TTL_MS, async () => {
+    const result = await loadAirport(icao);
+    // Do not cache "not found": a typo should not be remembered for a day,
+    // and a briefly unavailable upstream should be retried next request.
+    if (!result) throw Object.assign(new Error('not found'), { notFound: true });
+    return result.degraded ? { [TTL_OVERRIDE]: DEGRADED_TTL_MS, value: result } : result;
+  }).catch((error) => {
+    if (error.notFound) return { value: null };
+    throw error;
+  });
+
+  if (!value) return json({ error: `Airport ${icao} was not found` }, { status: 404 });
+
+  // Nearby-station flight categories change hourly, so they are fetched fresh
+  // even when the airport itself came from cache.
+  const ids = value.nearby.filter((item) => item.has_metar).map((item) => item.icao);
+  const metars = ids.length ? await fetchJson(`${API_BASE}/metar?ids=${ids.join(',')}&format=json`).catch(() => []) : [];
+  const byId = new Map((Array.isArray(metars) ? metars : []).map((metar) => [metar.icaoId, metar]));
+  const nearby = value.nearby.map((item) => {
+    const metar = byId.get(item.icao);
+    return {
+      ...item,
+      flight_category: metar?.fltCat || null,
+      wind_dir_deg: metar && metar.wdir !== 'VRB' ? Number(metar.wdir) : null,
+      wind_speed_kt: metar ? Number(metar.wspd ?? 0) : null,
+      wind_gust_kt: metar?.wgst != null ? Number(metar.wgst) : null,
+      observed_utc: metar?.reportTime || null,
+    };
+  });
 
   return json(
-    {
-      fetched_utc: new Date().toISOString(),
-      airport,
-      alternates: await alternatesFor(airport),
-      sources,
-    },
+    { fetched_utc: new Date().toISOString(), cached_utc, airport: value.airport, nearby },
     { headers: { 'Cache-Control': 'no-store' } },
   );
-};
+});

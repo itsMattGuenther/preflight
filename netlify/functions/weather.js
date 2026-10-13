@@ -1,118 +1,115 @@
-import { requireAuth, json } from './_auth.js';
+import { bearingDeg, distanceNm, round1 } from '../lib/geo.js';
+import { coordinateParams, fetchJson, handler, json, normalizeIcao, badRequest } from '../lib/http.js';
+import { normalizeMetar, normalizeTaf } from '../lib/wx.js';
 
-const METAR_URL = 'https://aviationweather.gov/api/data/metar';
-const TAF_URL = 'https://aviationweather.gov/api/data/taf';
-const WINDS_URL = 'https://aviationweather.gov/api/data/windtemp?region=nc&level=low&fcst=06';
-const GAIRMET_URL = 'https://aviationweather.gov/api/data/gairmet?format=json';
+const API_BASE = 'https://aviationweather.gov/api/data';
+const METAR_MAX_AGE_MS = 2.5 * 60 * 60 * 1000;
+const METAR_FALLBACK_RADIUS_NM = 30;
+const TAF_FALLBACK_RADIUS_NM = 40;
 
-async function fetchJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${res.status} ${url}`);
-  const text = await res.text();
-  return text ? JSON.parse(text) : [];
+async function stationsNear(center, radiusNm) {
+  // Many training fields have no weather reporting, or a METAR but no TAF.
+  // In that case use the nearest station that does, and say so in the UI.
+  const delta = radiusNm / 60 + 0.1;
+  const bbox = `${center.lat - delta},${center.lon - delta},${center.lat + delta},${center.lon + delta}`;
+  const stations = await fetchJson(`${API_BASE}/stationinfo?bbox=${bbox}&format=json`, { timeoutMs: 5000 }).catch(() => []);
+  return (Array.isArray(stations) ? stations : [])
+    .map((station) => ({
+      icao: station.icaoId,
+      name: station.site,
+      site_types: station.siteType || [],
+      distance_nm: round1(distanceNm(center, { lat: Number(station.lat), lon: Number(station.lon) })),
+      bearing_deg: bearingDeg(center, { lat: Number(station.lat), lon: Number(station.lon) }),
+    }))
+    .sort((a, b) => a.distance_nm - b.distance_nm);
 }
 
-function visibility(value) {
-  if (value == null) return null;
-  if (typeof value === 'string' && value.endsWith('+')) return Number(value.slice(0, -1));
-  return Number(value);
+function nearest(stations, siteType, radiusNm, excludeId) {
+  return stations
+    .filter((station) => station.icao !== excludeId && station.site_types.includes(siteType) && station.distance_nm <= radiusNm)
+    .map(({ site_types: _siteTypes, ...station }) => station);
 }
 
-function altimeterInHg(metar) {
-  if (metar.altim == null) return null;
-  return Math.round((Number(metar.altim) / 33.8639) * 100) / 100;
+function isRecent(metar) {
+  const observed = Date.parse(metar?.reportTime || '');
+  return Number.isFinite(observed) && Date.now() - observed < METAR_MAX_AGE_MS;
 }
 
-function normalizeMetar(metar) {
-  // AviationWeather's field names mirror raw feed abbreviations. Normalize them
-  // once here so React components can read descriptive names.
-  if (!metar) return null;
-  const clouds = Array.isArray(metar.clouds) ? metar.clouds : [];
-  const ceiling = clouds.find((cloud) => ['BKN', 'OVC', 'VV'].includes(cloud.cover));
-  const windDir = Number(metar.wdir);
+function summary(metar) {
+  const normalized = normalizeMetar(metar);
   return {
-    raw: metar.rawOb || '',
-    wind_dir_deg: Number.isFinite(windDir) ? windDir : null,
-    wind_speed_kt: Number(metar.wspd || 0),
-    wind_gust_kt: metar.wgst == null ? null : Number(metar.wgst),
-    visibility_sm: visibility(metar.visib),
-    weather: metar.wxString || metar.wx || '',
-    sky_condition: metar.cover || clouds.map((cloud) => `${cloud.cover}${cloud.base || ''}`).join(' ') || 'Unknown',
-    ceiling_ft: ceiling?.base || null,
-    temp_c: metar.temp == null ? null : Number(metar.temp),
-    dewpoint_c: metar.dewp == null ? null : Number(metar.dewp),
-    altimeter_inhg: altimeterInHg(metar),
-    flight_category: metar.fltCat || 'Unknown',
-    observed_utc: metar.reportTime || metar.receiptTime || null,
+    observed_utc: normalized.observed_utc,
+    raw: normalized.raw,
+    flight_category: normalized.flight_category,
+    wind_dir_deg: normalized.wind_dir_deg,
+    wind_vrb: normalized.wind_vrb,
+    wind_speed_kt: normalized.wind_speed_kt,
+    wind_gust_kt: normalized.wind_gust_kt,
+    visibility_sm: normalized.visibility_sm,
+    ceiling_ft: normalized.ceiling_ft,
+    altimeter_inhg: normalized.altimeter_inhg,
+    temp_c: normalized.temp_c,
+    dewpoint_c: normalized.dewpoint_c,
   };
 }
 
-function normalizeTaf(taf) {
-  // Keep only the first few TAF periods because the dashboard uses this for
-  // near-term planning, not a full briefing replacement.
-  if (!taf) return { raw: '', issued_utc: null, periods: [] };
-  const periods = Array.isArray(taf.fcsts) ? taf.fcsts : Array.isArray(taf.forecast) ? taf.forecast : [];
-  return {
-    raw: taf.rawTAF || taf.rawTaf || taf.rawOb || '',
-    issued_utc: taf.issueTime || taf.reportTime || null,
-    periods: periods.slice(0, 6).map((period) => ({
-      from_utc: period.timeFrom || period.validFrom || period.fcstTimeFrom || null,
-      to_utc: period.timeTo || period.validTo || period.fcstTimeTo || null,
-      wind_dir_deg: Number.isFinite(Number(period.wdir)) ? Number(period.wdir) : null,
-      wind_speed_kt: Number(period.wspd || 0),
-      visibility_sm: visibility(period.visib),
-      weather: period.wxString || period.wx || period.weather || '',
-      sky_condition: period.cover || period.clouds?.map?.((cloud) => `${cloud.cover}${cloud.base || ''}`).join(' ') || '',
-      ceiling_ft: period.clouds?.find?.((cloud) => ['BKN', 'OVC', 'VV'].includes(cloud.cover))?.base || null,
-      flight_category: period.fltCat || '',
-    })),
-  };
-}
-
-function parseWindsAloft(rows, icao) {
-  // Wind/temp rows can arrive either as compact FD-style strings or expanded
-  // direction/speed columns; support both shapes.
-  const row = Array.isArray(rows) ? rows.find((item) => item.station === icao || item.icaoId === icao || item.id === icao) : null;
-  if (!row) return {};
-  const result = {};
-  [
-    ['3000_ft', ['wind3000', 'wdir3000', 'wspd3000', 'temp3000']],
-    ['6000_ft', ['wind6000', 'wdir6000', 'wspd6000', 'temp6000']],
-    ['9000_ft', ['wind9000', 'wdir9000', 'wspd9000', 'temp9000']],
-  ].forEach(([label, [codeKey, dirKey, speedKey, tempKey]]) => {
-    if (row[codeKey] && typeof row[codeKey] === 'string') {
-      const code = row[codeKey];
-      result[label] = { dir_deg: Number(code.slice(0, 2)) * 10, speed_kt: Number(code.slice(2, 4)), temp_c: Number(code.slice(4)) || null };
-    } else if (row[dirKey] || row[speedKey]) {
-      result[label] = { dir_deg: Number(row[dirKey]), speed_kt: Number(row[speedKey]), temp_c: row[tempKey] == null ? null : Number(row[tempKey]) };
-    }
-  });
-  return result;
-}
-
-export default async (req) => {
-  const auth = requireAuth(req.headers);
-  if (!auth.ok) return json({ error: auth.message }, { status: auth.status });
-
+export default handler(async (req) => {
   const url = new URL(req.url);
-  const icao = (url.searchParams.get('icao') || 'KVBT').toUpperCase();
-  // Pull weather feeds in parallel. Optional feeds fall back to empty arrays so
-  // METAR/TAF can still render if winds aloft or G-AIRMET fails.
-  const [metars, tafs, winds, gairmets] = await Promise.all([
-    fetchJson(`${METAR_URL}?ids=${icao}&format=json&taf=false`),
-    fetchJson(`${TAF_URL}?ids=${icao}&format=json`),
-    fetchJson(WINDS_URL).catch(() => []),
-    fetchJson(GAIRMET_URL).catch(() => []),
+  const icao = normalizeIcao(url.searchParams.get('icao'));
+  if (!icao) return badRequest('icao is required');
+  const center = coordinateParams(url);
+
+  // Field METAR/TAF and the nearby-station list are fetched in parallel so the
+  // nearest-station fallback adds at most one more round trip.
+  const [metars, tafs, stations] = await Promise.all([
+    fetchJson(`${API_BASE}/metar?ids=${icao}&format=json&hours=3`, { timeoutMs: 6000 }).catch(() => []),
+    fetchJson(`${API_BASE}/taf?ids=${icao}&format=json`, { timeoutMs: 6000 }).catch(() => []),
+    center ? stationsNear(center, TAF_FALLBACK_RADIUS_NM) : Promise.resolve([]),
   ]);
 
+  // Whether the field itself is a reporting station decides how a fallback is
+  // explained: "no weather reporting here" vs "no current report right now".
+  const fieldStation = stations.find((station) => station.icao === icao);
+  const fieldHas = (type) => (fieldStation ? fieldStation.site_types.includes(type) : null);
+
+  let metarList = (Array.isArray(metars) ? metars : []).sort((a, b) => Date.parse(b.reportTime) - Date.parse(a.reportTime));
+  let metarSource = { icao, name: metarList[0]?.name || null, distance_nm: 0, bearing_deg: null, is_field: true };
+
+  if ((!metarList.length || !isRecent(metarList[0])) && center) {
+    for (const station of nearest(stations, 'METAR', METAR_FALLBACK_RADIUS_NM, icao).slice(0, 3)) {
+      const nearby = await fetchJson(`${API_BASE}/metar?ids=${station.icao}&format=json&hours=3`).catch(() => []);
+      const sorted = (Array.isArray(nearby) ? nearby : []).sort((a, b) => Date.parse(b.reportTime) - Date.parse(a.reportTime));
+      if (sorted.length && isRecent(sorted[0])) {
+        metarList = sorted;
+        metarSource = { ...station, is_field: false, reason: fieldHas('METAR') ? 'no_current_report' : 'no_reporting' };
+        break;
+      }
+    }
+  }
+
+  let taf = Array.isArray(tafs) ? tafs[0] : null;
+  let tafSource = taf ? { icao, name: taf.name || null, distance_nm: 0, bearing_deg: null, is_field: true } : null;
+  if (!taf && center) {
+    const [station] = nearest(stations, 'TAF', TAF_FALLBACK_RADIUS_NM, icao);
+    if (station) {
+      const nearby = await fetchJson(`${API_BASE}/taf?ids=${station.icao}&format=json`).catch(() => []);
+      if (Array.isArray(nearby) && nearby[0]) {
+        taf = nearby[0];
+        tafSource = { ...station, is_field: false, reason: fieldHas('TAF') ? 'no_current_report' : 'no_reporting' };
+      }
+    }
+  }
+
+  const latest = metarList[0] || null;
   return json(
     {
       fetched_utc: new Date().toISOString(),
-      metar: normalizeMetar(metars[0]),
-      taf: normalizeTaf(tafs[0]),
-      winds_aloft: parseWindsAloft(winds, icao),
-      gairmets: Array.isArray(gairmets) ? gairmets : [],
+      metar: latest ? normalizeMetar(latest) : null,
+      metar_source: latest ? metarSource : null,
+      recent: metarList.slice(0, 8).map(summary),
+      taf: taf ? normalizeTaf(taf) : null,
+      taf_source: tafSource,
     },
-    { headers: { 'Cache-Control': 'public, max-age=180' } },
+    { headers: { 'Cache-Control': 'public, max-age=120' } },
   );
-};
+});

@@ -9,3 +9,4 @@ npm-debug.log*
 
 # Internal design doc — kept locally, not published
 preflight_design_doc.md
+deno.lock

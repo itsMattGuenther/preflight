@@ -7,4 +7,8 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
   },
+  test: {
+    include: ['src/**/*.test.js', 'netlify/**/*.test.js'],
+    environment: 'node',
+  },
 });
