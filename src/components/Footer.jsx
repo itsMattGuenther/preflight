@@ -10,7 +10,7 @@ export function Footer() {
         <span>
           Data: <a href="https://aviationweather.gov" target="_blank" rel="noreferrer">NOAA AviationWeather.gov</a>,{' '}
           <a href="https://tfr.faa.gov" target="_blank" rel="noreferrer">FAA TFR</a>,{' '}
-          <a href="https://adsb.fi" target="_blank" rel="noreferrer">adsb.fi</a>,{' '}
+          <a href="https://adsb.lol" target="_blank" rel="noreferrer">adsb.lol</a>,{' '}
           <a href="https://www.rainviewer.com" target="_blank" rel="noreferrer">RainViewer</a>,{' '}
           <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>,{' '}
           <a href="https://www.airnav.com" target="_blank" rel="noreferrer">AirNav</a>,{' '}

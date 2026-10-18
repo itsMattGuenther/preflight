@@ -66,7 +66,7 @@ All feeds except NOTAMs are free and need no API key. The browser never calls th
 | TFRs | [FAA TFR GeoServer](https://tfr.faa.gov/) polygons and detail records |
 | Precipitation radar | [RainViewer](https://www.rainviewer.com/) |
 | Base maps | [OpenStreetMap](https://www.openstreetmap.org/) |
-| ADS-B traffic | [adsb.fi](https://adsb.fi/) open data |
+| ADS-B traffic | [adsb.lol](https://adsb.lol/) open data (ODbL) |
 | Fuel prices | [AirNav](https://www.airnav.com/) (cached 6 h) |
 | Airport photos | Wikipedia / Wikimedia Commons, with photographer and license credited |
 | NOTAMs | [FAA NOTAM API](https://api.faa.gov/) *(requires free credentials, see below)* |
@@ -169,7 +169,7 @@ Workers Builds is connected to this repo:
 
 - **A push to `main`** runs `npm run build`, then `npx wrangler deploy`, and it's live at preflight.mattguenther.com a minute later.
 - **A push to any other branch** runs the build, then `npx wrangler preview`, and the preview link appears on its pull request.
-- **A commit that changes nothing the site is made from doesn't build**: docs, tests, lint config, `scripts/` and `.github/`. Those paths are excluded in the Workers Builds settings.
+- **A commit that changes nothing the site is made from doesn't build**: the README, LICENSE, screenshots and logos, lint and git config, `scripts/` and `.github/`. Those paths are excluded in the Workers Builds settings.
 
 The free plan's limits shape the API code:
 
@@ -210,7 +210,7 @@ Not sure where to start? Open an [issue](../../issues) — bug reports, feature 
 - **Density altitude** uses the standard rule-of-thumb formula, not a POH performance calculation.
 - **Special use airspace** (MOAs, restricted areas) and airspace classes are not shown.
 - **Fuel prices and fallback frequencies** come from third-party pages whose formats change; always confirm against the Chart Supplement and the FBO.
-- **ADS-B traffic** depends on adsb.fi coverage, which is incomplete near the ground. Not every aircraft broadcasts ADS-B.
+- **ADS-B traffic** depends on adsb.lol coverage, which is incomplete near the ground. Not every aircraft broadcasts ADS-B.
 - **Winds aloft** cover the contiguous U.S. only.
 
 ---

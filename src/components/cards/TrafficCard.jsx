@@ -98,7 +98,7 @@ export function TrafficCard({ airport, traffic, now }) {
           })}
           {!visible.length ? <div className="map-empty">No ADS-B aircraft within {range} NM</div> : null}
           <div className="map-attribution">
-            <a href="https://adsb.fi" target="_blank" rel="noreferrer">adsb.fi</a> · © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>
+            <a href="https://adsb.lol" target="_blank" rel="noreferrer">adsb.lol</a> · © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>
           </div>
         </div>
 
