@@ -8,7 +8,7 @@
 
 Search any U.S. airport and Preflight pulls together what you would otherwise check across a dozen tabs: current weather decoded into plain English, an hour-by-hour TAF timeline, crosswind on the best runway, TFRs, SIGMETs/AIRMETs, nearby pilot reports, radar, live traffic, daylight and night-currency times, winds aloft, frequencies and fuel. Then it checks all of it against **your personal minimums** for the flight you are planning.
 
-🔗 **Live site:** https://preflightapp.netlify.app/
+🔗 **Live site:** https://preflight.mattguenther.com/
 
 This repository is the source for that one live app. Contributions made here ship to the live site, so improvements reach every pilot who uses it — the goal is to make **Preflight** better together, not to spin up separate copies. See [Contributing](#contributing) to get involved.
 
@@ -35,7 +35,7 @@ The dashboard is a single page per airport (e.g. `/KVBT`). A full-page capture i
 
 ## Features
 
-Search by identifier (`KVBT`, `VBT`, `7M5`), airport name, or city. Every airport has its own shareable URL, e.g. [`/KVBT`](https://preflightapp.netlify.app/KVBT).
+Search by identifier (`KVBT`, `VBT`, `7M5`), airport name, or city. Every airport has its own shareable URL, e.g. [`/KVBT`](https://preflight.mattguenther.com/KVBT).
 
 | Card | What it shows |
 | --- | --- |
@@ -56,7 +56,7 @@ Your minimums, home airport, and recent airports are stored only in your browser
 
 ## Data Sources
 
-All feeds except NOTAMs are free and need no API key. The browser never calls them directly: Netlify Functions proxy, normalize, and (where the source is slow or rate-limited) cache them in Netlify Blobs.
+All feeds except NOTAMs are free and need no API key. The browser never calls them directly: the API Worker proxies, normalizes, and (where the source is slow or rate-limited) caches them in D1.
 
 | Feed | Source |
 | --- | --- |
@@ -76,9 +76,9 @@ All feeds except NOTAMs are free and need no API key. The browser never calls th
 ## Tech Stack
 
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3 (base) + hand-written CSS, [TanStack Query](https://tanstack.com/query), `lucide-react` icons, `date-fns-tz`.
-- **Backend:** [Netlify Functions](https://docs.netlify.com/functions/overview/) (bundled with esbuild) behind a shared bearer-token guard, with a small read-through cache on [Netlify Blobs](https://docs.netlify.com/blobs/overview/).
+- **Backend:** one [Cloudflare Worker](https://developers.cloudflare.com/workers/) (`worker/`) that answers `/api/*`, behind a shared bearer-token guard, with a small read-through cache in [D1](https://developers.cloudflare.com/d1/).
 - **Tests:** [Vitest](https://vitest.dev/) for the aviation math, parsers, and the minimums engine.
-- **Hosting:** Netlify (static `dist` + functions), continuous deploy from `main`.
+- **Hosting:** Cloudflare Workers on the free plan: `dist` as static files plus the API Worker, deployed from `main` (see [Hosting and deploys](#hosting-and-deploys)).
 
 ---
 
@@ -95,13 +95,18 @@ preflight/
 │       ├── aviation/          # wind, metar, taf, minimums, sun, density, notam (+ tests)
 │       ├── format.js          # Zulu/local times, wind, visibility, units
 │       └── briefing.js        # "Copy briefing" text
-├── netlify/
+├── worker/
+│   ├── index.js               # the API: /api/<name> runs functions/<name>.js
 │   ├── functions/             # airport, weather, advisories, tfr, notams, winds-aloft,
-│   │                          #   traffic, radar, fuel, airport-image
-│   └── lib/                   # shared http/auth, cache, geo, METAR/TAF normalization,
-│       └── data/              #   winds-aloft parser; static airport + FD station data
-├── scripts/build-airport-data.mjs   # regenerates the OurAirports-derived data
-└── public/                    # icons, manifest, airport search index
+│   │                          #   traffic, radar, fuel, charts, airport-image
+│   ├── lib/                   # shared http/auth, cache, geo, METAR/TAF normalization,
+│   │   └── data/              #   winds-aloft parser; static airport + FD station data
+│   └── migrations/            # the D1 cache table
+├── scripts/
+│   ├── build-airport-data.mjs # regenerates the OurAirports-derived data
+│   └── dev.mjs                # `npm run dev`: Vite + the API in Wrangler
+├── public/                    # icons, manifest, airport search index, _headers
+└── wrangler.jsonc             # how Cloudflare runs it: static files, the Worker, D1
 ```
 
 ---
@@ -110,7 +115,7 @@ preflight/
 
 Want to contribute? Here's how to get Preflight running on your machine to develop and test changes before opening a pull request.
 
-**Prerequisites:** Node.js 20 or 22 (LTS) and npm. (The pinned Netlify CLI v17 fails to install on Node 26; use an LTS release.)
+**Prerequisites:** Node.js 22 or newer and npm.
 
 ```bash
 # 1. Install dependencies
@@ -126,13 +131,13 @@ openssl rand -hex 32
 Set **both** of these to that same value in `.env.local`:
 
 - `VITE_API_AUTH_TOKEN` — sent by the browser
-- `API_AUTH_TOKEN` — validated by the functions
+- `API_AUTH_TOKEN` — validated by the API
 
-Then start the dev server (Netlify Dev runs Vite + the functions together):
+Then start the dev server (Vite with hot reload, plus the API running in Wrangler, Cloudflare's local Workers runtime, with a local copy of the D1 cache in `.wrangler/`):
 
 ```bash
 npm run dev
-# open http://localhost:8888/KVBT
+# open http://localhost:5173/KVBT
 npm test        # run the test suite
 ```
 
@@ -142,19 +147,47 @@ npm test        # run the test suite
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `API_AUTH_TOKEN` | ✅ | Server-side token used by Netlify Functions to authorize requests. |
-| `VITE_API_AUTH_TOKEN` | ✅ | Browser-side token sent to the functions. **Must exactly match** `API_AUTH_TOKEN` and be present *before* the Vite build runs. |
+| `API_AUTH_TOKEN` | ✅ | Server-side token the API uses to authorize requests. |
+| `VITE_API_AUTH_TOKEN` | ✅ | Browser-side token sent to the API. **Must exactly match** `API_AUTH_TOKEN` and be present *before* the Vite build runs. |
 | `VITE_AIRPORT_ICAO` | optional | Pins a default airport for first-time visitors. When unset, first-time visitors see the landing page. (Returning visitors resume their last airport.) |
 | `FAA_NOTAM_CLIENT_ID` | optional | FAA NOTAM API client ID — register free at [api.faa.gov](https://api.faa.gov/). |
 | `FAA_NOTAM_CLIENT_SECRET` | optional | FAA NOTAM API client secret. |
 
-> ℹ️ **Security note:** `VITE_*` variables are compiled into the browser bundle and are therefore readable by anyone who loads the page. The shared token only deters random scanners from hitting the function URLs directly — it is **not** a secret and is not meant to protect against a determined visitor. Keep your *local* token different from production, and never reuse a real secret in a `VITE_` variable.
+> ℹ️ **Security note:** `VITE_*` variables are compiled into the browser bundle and are therefore readable by anyone who loads the page. The shared token only deters random scanners from hitting the API directly — it is **not** a secret and is not meant to protect against a determined visitor. Keep your *local* token different from production, and never reuse a real secret in a `VITE_` variable.
+
+---
+
+## Hosting and deploys
+
+Preflight runs on Cloudflare Workers, on the free plan. `wrangler.jsonc` says how:
+
+- **The app** (`dist/`, what `npm run build` writes) is served as static files, which cost nothing however often they're loaded. `public/_headers` sets their response headers.
+- **The API** is one Worker, `worker/index.js`. Only `/api/*` requests run it; `/api/weather` runs `worker/functions/weather.js`, and so on.
+- **The cache** (`worker/lib/cache.js`) keeps slow or rate-limited sources (AirNav, the national TFR list, FAA chart indexes) in memory and in a D1 database, `preflight`. Previews use their own database, `preflight-preview`, so preview code never writes into production's cache. The table is in `worker/migrations/`.
+
+Workers Builds is connected to this repo:
+
+- **A push to `main`** runs `npm run build`, then `npx wrangler deploy`, and it's live at preflight.mattguenther.com a minute later.
+- **A push to any other branch** runs the build, then `npx wrangler preview`, and the preview link appears on its pull request.
+- **A commit that changes nothing the site is made from doesn't build**: docs, tests, lint config, `scripts/` and `.github/`. Those paths are excluded in the Workers Builds settings.
+
+The free plan's limits shape the API code:
+
+- **10 ms of CPU per request.** Waiting on upstream sources doesn't count, but parsing does. That's why `charts.js` reads the FAA's 16 MB d-TPP index only as far as the one airport it needs instead of parsing all of it. Keep new parsing small, and check a preview's CPU time in the Worker's Observability tab.
+- **50 outgoing fetches per request.** The fuel function, the busiest, makes at most 13.
+- **100,000 API requests a day**, shared by every Worker on the account, reset at midnight UTC. Static files don't count. An open dashboard makes about 290 requests an hour (live traffic refreshes every 15 seconds), and polling stops in background tabs.
+
+Settings that live in Cloudflare, not in this repo:
+
+- `API_AUTH_TOKEN`: a Worker secret, set once for production (`npx wrangler secret put API_AUTH_TOKEN`) and once for every preview (`npx wrangler preview base-config secret put API_AUTH_TOKEN`).
+- `VITE_API_AUTH_TOKEN`: a build variable in Workers Builds (Settings → Build → Variables and secrets), the same value as `API_AUTH_TOKEN`, because Vite compiles it into the app.
+- `preflight.mattguenther.com` is the Worker's custom domain, from `routes` in `wrangler.jsonc`; Cloudflare makes its DNS record and certificate.
 
 ---
 
 ## Contributing
 
-Preflight is **one live application**, and this repository is its source of truth. The goal isn't for everyone to run their own copy — it's to improve the single app that pilots actually use. When a change lands on `main`, it deploys automatically to [preflightapp.netlify.app](https://preflightapp.netlify.app/).
+Preflight is **one live application**, and this repository is its source of truth. The goal isn't for everyone to run their own copy — it's to improve the single app that pilots actually use. When a change lands on `main`, it deploys automatically to [preflight.mattguenther.com](https://preflight.mattguenther.com/).
 
 Contributions of all sizes are welcome — bug fixes, new data sources, UI polish, or just blunt "this is bad practice, here's why" feedback.
 
@@ -163,7 +196,7 @@ Contributions of all sizes are welcome — bug fixes, new data sources, UI polis
 1. **Fork** this repo and create a branch for your change.
 2. Get it running locally (see [Local Development](#local-development)) and test against a few real airports.
 3. Run `npm test` and `npm run lint` and make sure both pass.
-4. Open a **pull request** against `main` describing what you changed and why.
+4. Open a **pull request** against `main` describing what you changed and why. Cloudflare builds it and posts a preview link on the pull request.
 5. Once reviewed and merged, your change ships to the live site automatically.
 
 Not sure where to start? Open an [issue](../../issues) — bug reports, feature ideas, and questions are all fair game.
@@ -186,12 +219,12 @@ Not sure where to start? Open an [issue](../../issues) — bug reports, feature 
 
 | Command | Description |
 | --- | --- |
-| `npm run dev` | Netlify Dev (Vite + functions) on `http://localhost:8888`. |
-| `npm run vite-only` | Vite dev server only (no functions). |
+| `npm run dev` | Vite on `http://localhost:5173`, with the API in Wrangler on port 8787. |
+| `npm run vite-only` | Vite dev server only (no API). |
 | `npm run build` | Production build to `dist/`. |
-| `npm run preview` | Preview the production build. |
+| `npm run preview` | Build, then serve it exactly as Cloudflare does (`_headers` included) on `http://localhost:8787`. |
 | `npm test` | Run the Vitest suite. |
-| `npm run lint` | ESLint over `src`, `netlify`, and `scripts`. |
+| `npm run lint` | ESLint over `src`, `worker`, and `scripts`. |
 | `npm run build:airports` | Regenerate the OurAirports-derived search index and fallback airport data. |
 
 ---
@@ -214,7 +247,7 @@ What I've checked so far has mostly been hands-on:
 
 That leaves plenty I'd genuinely welcome a second set of eyes on:
 
-- **Security & input validation** — especially the Netlify Functions and how external API data is handled
+- **Security & input validation** — especially the API Worker and how external API data is handled
 - **Edge cases** I haven't thought to test
 - **Code quality & idiomatic patterns** — places where this isn't the modern, idiomatic way to do things
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { readJson, writeJson } from '../lib/storage';
 
-// The selected airport lives in the URL (preflightapp.netlify.app/KVBT) so a
+// The selected airport lives in the URL (preflight.mattguenther.com/KVBT) so a
 // briefing can be shared, bookmarked, or added to a phone's home screen, and
 // the back button moves between airports.
 const LAST_KEY = 'preflight:selectedAirport';

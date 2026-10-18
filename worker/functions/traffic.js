@@ -6,7 +6,9 @@ const MEMO_TTL_MS = 8000;
 
 // adsb.fi's open API is free and rate limited. Identical requests that arrive
 // within a few seconds (several visitors watching the same airport) share one
-// upstream call while this function instance is warm.
+// upstream result while this Worker isolate is warm. Only finished results are
+// shared: Workers ties an in-flight fetch to the request that started it, so
+// another request must not wait on it.
 const memo = new Map();
 
 function clean(value) {
@@ -59,12 +61,11 @@ export default handler(async (req) => {
   const now = Date.now();
   let entry = memo.get(key);
   if (!entry || now - entry.at > MEMO_TTL_MS) {
-    entry = { at: now, promise: load(rounded, radius) };
+    entry = { at: now, aircraft: await load(rounded, radius) };
     memo.set(key, entry);
     if (memo.size > 200) memo.delete(memo.keys().next().value);
-    entry.promise.catch(() => memo.delete(key));
   }
-  const aircraft = await entry.promise;
+  const { aircraft } = entry;
 
   return json(
     { fetched_utc: new Date(entry.at).toISOString(), source: 'adsb.fi', center: rounded, radius_nm: radius, count: aircraft.length, aircraft },
