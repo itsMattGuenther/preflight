@@ -1,15 +1,15 @@
-// Shared plumbing for every Netlify function: the bearer-token guard, JSON
+// Shared plumbing for every API function: the bearer-token guard, JSON
 // responses, upstream fetches with timeouts, and input normalization. Keeping
 // this in one place means every function validates input the same way.
 
 const DEFAULT_TIMEOUT_MS = 8000;
-const USER_AGENT = 'preflight-dashboard/2.0 (+https://preflightapp.netlify.app)';
+const USER_AGENT = 'preflight-dashboard/2.0 (+https://preflight.mattguenther.com)';
 
-export function requireAuth(headers) {
+export function requireAuth(headers, env = {}) {
   // The browser sends VITE_API_AUTH_TOKEN and the function compares it to the
   // server-only API_AUTH_TOKEN. This deters casual scanners; it is not a secret
   // because the browser bundle necessarily contains it (see README).
-  const expected = process.env.API_AUTH_TOKEN;
+  const expected = env.API_AUTH_TOKEN;
   if (!expected) {
     return { ok: false, status: 500, message: 'Missing API_AUTH_TOKEN environment variable' };
   }
@@ -33,12 +33,13 @@ export function json(body, init = {}) {
 
 // Wraps a handler with the auth guard and a last-resort error response so an
 // unexpected upstream failure returns JSON the UI can show instead of a crash.
+// `env` is the Worker's environment: its variables, secrets and bindings.
 export function handler(fn) {
-  return async (req, context) => {
-    const auth = requireAuth(req.headers);
+  return async (req, env) => {
+    const auth = requireAuth(req.headers, env);
     if (!auth.ok) return json({ error: auth.message }, { status: auth.status });
     try {
-      return await fn(req, context);
+      return await fn(req, env);
     } catch (error) {
       console.error(error);
       return json({ error: error.message || 'Upstream request failed' }, { status: 502 });

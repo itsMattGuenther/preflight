@@ -1,42 +1,37 @@
-import { getDeployStore, getStore } from '@netlify/blobs';
-
 // Small read-through cache for slow or rate-limited upstream sources (AirNav
 // scraping, the national TFR list, winds aloft text, airport reference data).
-// Two layers: an in-memory Map that survives while a function instance is warm,
-// and Netlify Blobs so every instance shares results. If the upstream call
-// fails, a stale cached value is served rather than an error
-// ("stale-if-error"), and if Blobs is unavailable everything still works, just
-// uncached.
+// Two layers: an in-memory Map that survives while a Worker isolate is warm,
+// and a D1 table so every isolate shares results. If the upstream call fails,
+// a stale cached value is served rather than an error ("stale-if-error"), and
+// if D1 is unavailable everything still works, just uncached.
 
-const STORE_NAME = 'preflight-cache';
 const memory = new Map();
 const MAX_MEMORY_ENTRIES = 300;
 
-function store() {
-  // Production shares one site-wide cache. Deploy previews and branch deploys
-  // get a deploy-scoped store so preview code never writes into production's
-  // cache (Netlify's recommended isolation for global blob stores). Local dev
-  // uses the CLI's sandboxed store.
-  const context = globalThis.Netlify?.context?.deploy?.context;
+// The D1 binding (env.DB), handed over by worker/index.js on every request.
+// Production and previews are bound to separate databases in wrangler.jsonc,
+// so preview code never writes into production's cache. Tests run without it.
+let database = null;
+
+export function setDatabase(binding) {
+  database = binding || null;
+}
+
+async function readStored(key) {
   try {
-    if (context === 'production' || !context || context === 'dev') return getStore({ name: STORE_NAME });
-    return getDeployStore({ name: STORE_NAME });
+    const entry = await database?.prepare('SELECT entry FROM cache WHERE key = ?1').bind(key).first('entry');
+    return entry ? JSON.parse(entry) : null;
   } catch {
     return null;
   }
 }
 
-async function readBlob(key) {
+async function writeStored(key, entry) {
   try {
-    return (await store()?.get(key, { type: 'json' })) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function writeBlob(key, entry) {
-  try {
-    await store()?.setJSON(key, entry);
+    await database
+      ?.prepare('INSERT INTO cache (key, entry) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET entry = excluded.entry')
+      .bind(key, JSON.stringify(entry))
+      .run();
   } catch {
     // Caching is an optimization; a failed write must never fail the request.
   }
@@ -64,8 +59,8 @@ export async function cached(key, ttlMs, load, { maxStaleMs = 24 * 60 * 60 * 100
   const ttlOf = (item) => item.ttl_ms ?? ttlMs;
   let entry = memory.get(key) || null;
   if (!entry || now - entry.stored_at > ttlOf(entry)) {
-    const fromBlob = await readBlob(key);
-    if (fromBlob && (!entry || fromBlob.stored_at > entry.stored_at)) entry = fromBlob;
+    const stored = await readStored(key);
+    if (stored && (!entry || stored.stored_at > entry.stored_at)) entry = stored;
   }
   if (entry && now - entry.stored_at <= ttlOf(entry)) {
     remember(key, entry);
@@ -78,7 +73,7 @@ export async function cached(key, ttlMs, load, { maxStaleMs = 24 * 60 * 60 * 100
     const value = override ? loaded.value : loaded;
     const fresh = { stored_at: now, value, ...(override ? { ttl_ms: loaded[TTL_OVERRIDE] } : {}) };
     remember(key, fresh);
-    await writeBlob(key, fresh);
+    await writeStored(key, fresh);
     return { value, cached_utc: new Date(now).toISOString(), stale: false };
   } catch (error) {
     if (entry && now - entry.stored_at <= maxStaleMs) {

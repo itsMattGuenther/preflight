@@ -1,12 +1,16 @@
 import { coordinateParams, fetchJson, handler, json, badRequest } from '../lib/http.js';
 
-const ADSB_FI_URL = 'https://opendata.adsb.fi/api/v3';
+// adsb.lol's open data (ODbL, credited on the card and in the footer). adsb.fi
+// serves the same readsb format but refuses requests from Cloudflare Workers.
+const ADSB_LOL_URL = 'https://api.adsb.lol/v2';
 const MAX_RADIUS_NM = 40;
 const MEMO_TTL_MS = 8000;
 
-// adsb.fi's open API is free and rate limited. Identical requests that arrive
+// adsb.lol's open API is free and rate limited. Identical requests that arrive
 // within a few seconds (several visitors watching the same airport) share one
-// upstream call while this function instance is warm.
+// upstream result while this Worker isolate is warm. Only finished results are
+// shared: Workers ties an in-flight fetch to the request that started it, so
+// another request must not wait on it.
 const memo = new Map();
 
 function clean(value) {
@@ -41,7 +45,7 @@ function normalizeAircraft(ac) {
 }
 
 async function load(center, radius) {
-  const body = await fetchJson(`${ADSB_FI_URL}/lat/${center.lat}/lon/${center.lon}/dist/${radius}`, { timeoutMs: 7000 });
+  const body = await fetchJson(`${ADSB_LOL_URL}/lat/${center.lat}/lon/${center.lon}/dist/${radius}`, { timeoutMs: 7000 });
   return (body.ac || [])
     .filter((ac) => Number.isFinite(Number(ac.lat)) && Number.isFinite(Number(ac.lon)))
     .map(normalizeAircraft)
@@ -59,15 +63,14 @@ export default handler(async (req) => {
   const now = Date.now();
   let entry = memo.get(key);
   if (!entry || now - entry.at > MEMO_TTL_MS) {
-    entry = { at: now, promise: load(rounded, radius) };
+    entry = { at: now, aircraft: await load(rounded, radius) };
     memo.set(key, entry);
     if (memo.size > 200) memo.delete(memo.keys().next().value);
-    entry.promise.catch(() => memo.delete(key));
   }
-  const aircraft = await entry.promise;
+  const { aircraft } = entry;
 
   return json(
-    { fetched_utc: new Date(entry.at).toISOString(), source: 'adsb.fi', center: rounded, radius_nm: radius, count: aircraft.length, aircraft },
+    { fetched_utc: new Date(entry.at).toISOString(), source: 'adsb.lol', center: rounded, radius_nm: radius, count: aircraft.length, aircraft },
     { headers: { 'Cache-Control': 'public, max-age=10' } },
   );
 });

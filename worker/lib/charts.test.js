@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseChartSupplementIndex, parseTppMetafile } from '../functions/charts.js';
+import { findRecord, parseChartSupplementIndex, parseTppMetafile } from '../functions/charts.js';
 import { faaRegion } from '../functions/fuel.js';
 import { airacCycle, chartSupplementEdition } from './cycles.js';
 
@@ -35,6 +35,37 @@ describe('FAA chart indexes', () => {
     const xml = `<airport><aptname></aptname><aptid></aptid><navidname>ADAK</navidname><pages><pdf>ak_34.pdf</pdf></pages></airport>
       <airport><aptname>OZARK/FRANKLIN CO</aptname><aptid>7M5</aptid><navidname></navidname><pages><pdf>sc_76_03SEP2026.pdf</pdf></pages></airport>`;
     expect(parseChartSupplementIndex(xml)).toEqual({ '7M5': ['sc_76_03SEP2026.pdf'] });
+  });
+
+  // The indexes arrive in network-sized pieces; 7-byte pieces split every tag.
+  function pieces(text, size = 7) {
+    const bytes = new TextEncoder().encode(text);
+    let offset = 0;
+    let pulls = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        if (offset >= bytes.length) return controller.close();
+        controller.enqueue(bytes.slice(offset, offset + size));
+        offset += size;
+      },
+    });
+    return { stream, pulls: () => pulls, total: Math.ceil(bytes.length / size) };
+  }
+
+  const metafile = ['VBS', 'VBT', 'XNA'].map((ident) => `<airport_name ID="${ident} FIELD" military="N" apt_ident="${ident}" icao_ident="K${ident}"><record><chart_code>APD</chart_code><chart_name>AIRPORT DIAGRAM</chart_name><pdf_name>${ident}AD.PDF</pdf_name></record></airport_name>`).join('\n');
+
+  it('finds one airport in a streamed index, even when its tags are split across pieces', async () => {
+    const { stream, pulls, total } = pieces(metafile);
+    const record = await findRecord(stream, 'apt_ident="VBT"', '<airport_name ', '</airport_name>');
+    expect(parseTppMetafile(record)).toEqual({ VBT: { icao: 'KVBT', diagram: ['AIRPORT DIAGRAM', 'VBTAD.PDF'], hot_spots: [], lahso: [], iap: 0, dp: 0, star: 0 } });
+    // It stops reading once the airport's record is complete.
+    expect(pulls()).toBeLessThan(total);
+  });
+
+  it('returns null for an airport the index does not list, and never matches a longer identifier', async () => {
+    expect(await findRecord(pieces(metafile).stream, 'apt_ident="VB"', '<airport_name ', '</airport_name>')).toBeNull();
+    expect(await findRecord(pieces(metafile).stream, 'apt_ident="7M5"', '<airport_name ', '</airport_name>')).toBeNull();
   });
 });
 

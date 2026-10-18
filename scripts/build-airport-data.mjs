@@ -3,7 +3,7 @@
 // https://ourairports.com/data/):
 //
 //   public/data/airports-search.json        name/city search index for the browser
-//   netlify/lib/data/airports-fallback.json location + runways for airports that
+//   worker/lib/data/airports-fallback.json location + runways for airports that
 //                                            AviationWeather.gov does not cover
 //
 // Frequencies are deliberately NOT taken from OurAirports: they are community
@@ -121,7 +121,7 @@ for (const airport of us) {
 search.sort((a, b) => a[5] - b[5] || a[0].localeCompare(b[0]));
 
 await mkdir(resolve(ROOT, 'public/data'), { recursive: true });
-await mkdir(resolve(ROOT, 'netlify/lib/data'), { recursive: true });
+await mkdir(resolve(ROOT, 'worker/lib/data'), { recursive: true });
 await writeFile(resolve(ROOT, 'public/data/airports-search.json'), JSON.stringify(search));
-await writeFile(resolve(ROOT, 'netlify/lib/data/airports-fallback.json'), JSON.stringify(fallback));
+await writeFile(resolve(ROOT, 'worker/lib/data/airports-fallback.json'), JSON.stringify(fallback));
 console.log(`Wrote ${search.length} airports (${new Date().toISOString().slice(0, 10)}).`);

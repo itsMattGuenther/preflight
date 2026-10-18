@@ -67,7 +67,7 @@ describe('buildBriefing', () => {
       weather: { metar: { raw: 'METAR KVBT ...', flight_category: 'VFR', wind_dir_deg: 180, wind_speed_kt: 6 }, metar_source: { is_field: true } },
       evaluation: { verdict: 'within', checks: [{ label: 'Ceiling', status: 'pass', value: 'None', limit: '3,000 ft+' }], notChecked: ['NOTAMs'] },
       windowRange: { startMs: Date.parse('2026-10-01T18:00:00Z'), endMs: Date.parse('2026-10-01T19:30:00Z') },
-      url: 'https://preflightapp.netlify.app/KVBT',
+      url: 'https://preflight.mattguenther.com/KVBT',
     });
     expect(text).toContain('Personal minimums: WITHIN YOUR MINIMUMS');
     expect(text).toContain('[OK] Ceiling: None (limit 3,000 ft+)');

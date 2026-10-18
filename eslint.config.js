@@ -5,7 +5,10 @@ const browser = {
   AbortSignal: 'readonly',
   Blob: 'readonly',
   Intl: 'readonly',
+  ReadableStream: 'readonly',
   Response: 'readonly',
+  TextDecoderStream: 'readonly',
+  TextEncoder: 'readonly',
   URL: 'readonly',
   URLSearchParams: 'readonly',
   console: 'readonly',
@@ -19,10 +22,10 @@ const browser = {
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', '.netlify/**'],
+    ignores: ['dist/**', 'node_modules/**', '.netlify/**', '.wrangler/**'],
   },
   {
-    files: ['src/**/*.{js,jsx}', 'netlify/**/*.js', 'scripts/**/*.mjs'],
+    files: ['src/**/*.{js,jsx}', 'worker/**/*.js', 'scripts/**/*.mjs'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',

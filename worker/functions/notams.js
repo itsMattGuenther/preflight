@@ -41,12 +41,12 @@ async function loadNotams(icao, clientId, clientSecret) {
   return { notams, total: body.totalCount ?? notams.length };
 }
 
-export default handler(async (req) => {
+export default handler(async (req, env) => {
   const icao = normalizeIcao(new URL(req.url).searchParams.get('icao'));
   if (!icao) return badRequest('icao is required');
 
-  const clientId = process.env.FAA_NOTAM_CLIENT_ID;
-  const clientSecret = process.env.FAA_NOTAM_CLIENT_SECRET;
+  const clientId = env.FAA_NOTAM_CLIENT_ID;
+  const clientSecret = env.FAA_NOTAM_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
     // Say so explicitly. The UI must never present "no data" as "no NOTAMs".
     return json({ configured: false, fetched_utc: new Date().toISOString(), notams: [] });

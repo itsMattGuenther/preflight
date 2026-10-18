@@ -1,0 +1,19 @@
+# Response headers for the static files on Cloudflare (at most 100 rules).
+# /api/* responses come from worker/ and set their own.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# The airport search list changes only when scripts/build-airport-data.mjs runs.
+/data/*
+  Cache-Control: public, max-age=86400
+
+# Vite fingerprints everything in /assets, so browsers can keep it forever.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Keep the workers.dev preview addresses out of search results.
+https://:worker.:account.workers.dev/*
+  X-Robots-Tag: noindex

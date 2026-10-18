@@ -6,7 +6,7 @@ import { parseFdText } from '../lib/windsAloft.js';
 
 // The NWS FD forecast covers ~175 points across the contiguous US. We pick the
 // nearest one to the selected airport. Station coordinates are a static table
-// (netlify/lib/data/fd-stations.json) because the points never move.
+// (worker/lib/data/fd-stations.json) because the points never move.
 const FD_URL = (hours) => `https://aviationweather.gov/api/data/windtemp?region=us&level=low&fcst=${hours}`;
 const MAX_DISTANCE_NM = 150;
 
