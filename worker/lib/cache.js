@@ -37,6 +37,17 @@ async function writeStored(key, entry) {
   }
 }
 
+// Small shared values that aren't cached results, such as traffic's rate-limit
+// backoff: read and written straight through to D1 so every isolate sees them.
+// Without D1 (tests, or an outage) they read as null.
+export function getShared(key) {
+  return readStored(key);
+}
+
+export function setShared(key, value) {
+  return writeStored(key, value);
+}
+
 function remember(key, entry) {
   if (memory.size >= MAX_MEMORY_ENTRIES) memory.delete(memory.keys().next().value);
   memory.set(key, entry);

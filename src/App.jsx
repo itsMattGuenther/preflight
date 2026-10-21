@@ -31,6 +31,7 @@ import {
   useWeather,
   useWindsAloft,
 } from './hooks/useData';
+import { useIdle } from './hooks/useIdle';
 import { useLastSeen } from './hooks/useLastSeen';
 import { useMinimums } from './hooks/useMinimums';
 import { useNow } from './hooks/useNow';
@@ -90,7 +91,9 @@ export default function App() {
   const tfrs = useTfrs(airport);
   const winds = useWindsAloft(airport);
   const notams = useNotams(icao);
-  const traffic = useTraffic(airport);
+  // Live traffic pauses after 10 minutes without activity (see useIdle).
+  const [idle, wake] = useIdle(10 * 60 * 1000);
+  const traffic = useTraffic(airport, !idle);
   const fuel = useFuel(icao, airport, airportQuery.data?.nearby);
   const radar = useRadar();
   const image = useAirportImage(airport);
@@ -216,7 +219,7 @@ export default function App() {
               </div>
               <h2 className="section-title">Traffic, fuel &amp; frequencies</h2>
               <div className="row row-wide">
-                <TrafficCard airport={airport} traffic={traffic} now={now} />
+                <TrafficCard airport={airport} traffic={traffic} now={now} paused={idle} onResume={wake} />
                 <NearbyCard nearby={airportQuery.data?.nearby} loading={airportQuery.isPending} onSelect={selectAirport} />
               </div>
               <div className="row row-wide">
