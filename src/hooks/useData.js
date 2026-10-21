@@ -80,10 +80,11 @@ export function useTraffic(airport, enabled = true) {
     queryKey: ['traffic', point?.lat, point?.lon],
     queryFn: () => apiFetch('traffic', { ...point, radius_nm: 25 }),
     enabled: Boolean(point) && enabled,
-    staleTime: 20 * 1000,
-    // adsb.lol is free and rate limited: every 30 seconds, and once a minute
-    // (with no quick retry) while it's asking us to slow down.
-    refetchInterval: (query) => (query.state.error?.code === 'rate_limited' ? 60 * 1000 : 30 * 1000),
+    // adsb.lol is free and rate limited: once a minute, with no quick retry
+    // while it's asking us to slow down. The Worker shares each answer for
+    // 50 seconds, so every refresh still gets new positions.
+    staleTime: 50 * 1000,
+    refetchInterval: MINUTE,
     retry: (count, error) => error.code !== 'rate_limited' && count < 1,
   });
 }

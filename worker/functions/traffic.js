@@ -1,4 +1,4 @@
-import { cached } from '../lib/cache.js';
+import { cached, getShared, setShared } from '../lib/cache.js';
 import { coordinateParams, fetchJson, handler, json, badRequest } from '../lib/http.js';
 
 // adsb.lol's open data (ODbL, credited on the card and in the footer). adsb.fi
@@ -9,15 +9,37 @@ const MAX_RADIUS_NM = 40;
 // adsb.lol's open API is free and rate limited, and Workers share outbound IP
 // addresses, so other sites' requests count against the same limit. Everyone
 // watching an airport shares one upstream result for TTL_MS, through the D1
-// cache. If adsb.lol refuses, the last result is served, marked stale, for up
-// to MAX_STALE_MS; older positions are no use as traffic.
-const TTL_MS = 20 * 1000;
+// cache: about one request a minute per airport, since the app refreshes once
+// a minute. If adsb.lol refuses, the last result is served, marked stale, for
+// up to MAX_STALE_MS; older positions are no use as traffic.
+const TTL_MS = 50 * 1000;
 const MAX_STALE_MS = 5 * 60 * 1000;
 
-// After a 429, this isolate stops asking for at least COOLDOWN_MS instead of
-// retrying on every visitor's next refresh, which would keep the limit hit.
-const COOLDOWN_MS = 60 * 1000;
-let coolingUntil = 0;
+// After a 429, every copy of this Worker stops asking adsb.lol: for 1 minute,
+// then 2, 4, 8 and 16 while it keeps refusing, at most 30 (or longer if it
+// says so with Retry-After). A success starts the next backoff over at 1
+// minute. The state lives in D1 so all isolates wait together, with a copy in
+// memory so a waiting isolate doesn't re-read it on every request.
+const BACKOFF_KEY = 'traffic/v1/backoff';
+const FIRST_BACKOFF_MS = 60 * 1000;
+const MAX_BACKOFF_MS = 30 * 60 * 1000;
+const CLEAR = { until: 0, step: 0 };
+let backoff = CLEAR;
+
+async function currentBackoff() {
+  if (Date.now() < backoff.until) return backoff;
+  backoff = (await getShared(BACKOFF_KEY)) || backoff;
+  return backoff;
+}
+
+async function backOff(previous, retryAfterSeconds) {
+  const now = Date.now();
+  // Escalate while the refusals keep coming; after a quiet spell, start over.
+  const step = now - previous.until < MAX_BACKOFF_MS ? Math.min(previous.step + 1, 5) : 0;
+  const wait = Math.max(Math.min(MAX_BACKOFF_MS, FIRST_BACKOFF_MS * 2 ** step), (retryAfterSeconds || 0) * 1000);
+  backoff = { until: now + wait, step };
+  await setShared(BACKOFF_KEY, backoff);
+}
 
 function clean(value) {
   return typeof value === 'string' ? value.trim() : value;
@@ -55,13 +77,18 @@ function rateLimited() {
 }
 
 async function load(center, radius) {
-  if (Date.now() < coolingUntil) throw rateLimited();
+  const state = await currentBackoff();
+  if (Date.now() < state.until) throw rateLimited();
   let body;
   try {
     body = await fetchJson(`${ADSB_LOL_URL}/lat/${center.lat}/lon/${center.lon}/dist/${radius}`, { timeoutMs: 7000 });
   } catch (error) {
-    if (error.status === 429) coolingUntil = Date.now() + Math.max(COOLDOWN_MS, (error.retryAfterSeconds || 0) * 1000);
+    if (error.status === 429) await backOff(state, error.retryAfterSeconds);
     throw error;
+  }
+  if (state.until) {
+    backoff = CLEAR;
+    await setShared(BACKOFF_KEY, CLEAR);
   }
   return (body.ac || [])
     .filter((ac) => Number.isFinite(Number(ac.lat)) && Number.isFinite(Number(ac.lon)))
@@ -83,8 +110,9 @@ export default handler(async (req) => {
   } catch (error) {
     if (error.status !== 429) throw error;
     // Nothing recent to fall back on. The app shows a calm "busy" note for
-    // this code and tries again once retry_after_s has passed.
-    const retryAfter = Math.max(1, Math.ceil((coolingUntil - Date.now()) / 1000));
+    // this code and checks back once a minute; until the backoff ends, those
+    // checks are answered here without asking adsb.lol.
+    const retryAfter = Math.max(1, Math.ceil((backoff.until - Date.now()) / 1000));
     return json(
       { error: 'Live traffic is busy', code: 'rate_limited', retry_after_s: retryAfter },
       { status: 503, headers: { 'Retry-After': String(retryAfter) } },

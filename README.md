@@ -175,7 +175,7 @@ The free plan's limits shape the API code:
 
 - **10 ms of CPU per request.** Waiting on upstream sources doesn't count, but parsing does. That's why `charts.js` reads the FAA's 16 MB d-TPP index only as far as the one airport it needs instead of parsing all of it. Keep new parsing small, and check a preview's CPU time in the Worker's Observability tab.
 - **50 outgoing fetches per request.** The fuel function, the busiest, makes at most 13.
-- **100,000 API requests a day**, shared by every Worker on the account, reset at midnight UTC. Static files don't count. An open dashboard makes about 170 requests an hour (live traffic refreshes every 30 seconds), and polling stops in background tabs.
+- **100,000 API requests a day**, shared by every Worker on the account, reset at midnight UTC. Static files don't count. An open dashboard makes about 110 requests an hour (live traffic refreshes once a minute), polling stops in background tabs, and traffic pauses after 10 minutes without activity.
 
 Settings that live in Cloudflare, not in this repo:
 
@@ -210,7 +210,7 @@ Not sure where to start? Open an [issue](../../issues) — bug reports, feature 
 - **Density altitude** uses the standard rule-of-thumb formula, not a POH performance calculation.
 - **Special use airspace** (MOAs, restricted areas) and airspace classes are not shown.
 - **Fuel prices and fallback frequencies** come from third-party pages whose formats change; always confirm against the Chart Supplement and the FBO.
-- **ADS-B traffic** depends on adsb.lol coverage, which is incomplete near the ground. Not every aircraft broadcasts ADS-B. adsb.lol is free and rate limited, and Cloudflare Workers share outbound IP addresses, so it sometimes refuses; the card then shows the last positions, marked as old, for up to five minutes, and otherwise says live traffic is busy.
+- **ADS-B traffic** depends on adsb.lol coverage, which is incomplete near the ground. Not every aircraft broadcasts ADS-B. adsb.lol is free and rate limited, and Cloudflare Workers share outbound IP addresses, so it sometimes refuses. To stay light on it, everyone viewing an airport shares one request a minute, idle pages pause traffic after 10 minutes, and after a refusal the Worker backs off from 1 minute up to 30. Meanwhile the card shows the last positions, marked as old, for up to five minutes, and otherwise says live traffic is busy.
 - **Winds aloft** cover the contiguous U.S. only.
 
 ---

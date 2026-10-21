@@ -21,21 +21,35 @@ function trend(rate) {
   return '';
 }
 
-export function TrafficCard({ airport, traffic, now }) {
+export function TrafficCard({ airport, traffic, now, paused = false, onResume }) {
   const [range, setRange] = useState(10);
   const [hover, setHover] = useState(null);
   const config = RANGES.find((item) => item.value === range);
 
+  // Idle pages stop polling (App's useIdle). Old positions aren't shown while
+  // paused; any activity resumes and refreshes.
+  if (airport && paused) {
+    return (
+      <Card title="Traffic (ADS-B)" icon={RadioTower} className="area-traffic">
+        <div className="notice notice-info">
+          <span>Live traffic is paused because this page has been idle for 10 minutes.</span>
+          <button type="button" className="text-button" onClick={() => onResume?.()}>Resume</button>
+        </div>
+      </Card>
+    );
+  }
   if (!airport || traffic.isPending) return <Card title="Traffic (ADS-B)" icon={RadioTower} className="area-traffic"><Skeleton lines={6} /></Card>;
   // After a failed refresh, keep showing the last positions while they're
   // recent, marked as old (below); past MAX_AGE_MS, say why there's nothing.
   const recent = traffic.data && now - Date.parse(traffic.data.fetched_utc) <= MAX_AGE_MS;
+  // Back from a pause or a hidden tab: wait for fresh positions, not old ones.
+  if (!recent && traffic.isFetching) return <Card title="Traffic (ADS-B)" icon={RadioTower} className="area-traffic"><Skeleton lines={6} /></Card>;
   if (traffic.isError && !recent) {
     return (
       <Card title="Traffic (ADS-B)" icon={RadioTower} className="area-traffic">
         {traffic.error?.code === 'rate_limited' ? (
           <div className="notice notice-info">
-            Live traffic is busy right now. It comes from adsb.lol, a free community network that limits how often it can be asked. Preflight will try again in a minute.
+            Live traffic is busy right now. It comes from adsb.lol, a free community network that limits how often it can be asked. Preflight will keep checking and show traffic again when it can.
           </div>
         ) : (
           <ErrorNote error={traffic.error} what="ADS-B traffic" onRetry={traffic.refetch} />
