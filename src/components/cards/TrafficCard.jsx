@@ -11,6 +11,8 @@ const RANGES = [
 ];
 const PATTERN_NM = 5;
 const PATTERN_AGL = 2500;
+// Positions older than this are no use as traffic, even marked as old.
+const MAX_AGE_MS = 5 * 60 * 1000;
 
 function trend(rate) {
   if (rate == null) return '';
@@ -25,7 +27,22 @@ export function TrafficCard({ airport, traffic, now }) {
   const config = RANGES.find((item) => item.value === range);
 
   if (!airport || traffic.isPending) return <Card title="Traffic (ADS-B)" icon={RadioTower} className="area-traffic"><Skeleton lines={6} /></Card>;
-  if (traffic.isError) return <Card title="Traffic (ADS-B)" icon={RadioTower} className="area-traffic"><ErrorNote error={traffic.error} what="ADS-B traffic" onRetry={traffic.refetch} /></Card>;
+  // After a failed refresh, keep showing the last positions while they're
+  // recent, marked as old (below); past MAX_AGE_MS, say why there's nothing.
+  const recent = traffic.data && now - Date.parse(traffic.data.fetched_utc) <= MAX_AGE_MS;
+  if (traffic.isError && !recent) {
+    return (
+      <Card title="Traffic (ADS-B)" icon={RadioTower} className="area-traffic">
+        {traffic.error?.code === 'rate_limited' ? (
+          <div className="notice notice-info">
+            Live traffic is busy right now. It comes from adsb.lol, a free community network that limits how often it can be asked. Preflight will try again in a minute.
+          </div>
+        ) : (
+          <ErrorNote error={traffic.error} what="ADS-B traffic" onRetry={traffic.refetch} />
+        )}
+      </Card>
+    );
+  }
 
   const elevation = airport.elevation_ft || 0;
   const all = (traffic.data?.aircraft || []).map((ac) => ({
@@ -46,6 +63,9 @@ export function TrafficCard({ airport, traffic, now }) {
       meta={traffic.data ? `Updated ${timeAgo(traffic.data.fetched_utc, now)}` : null}
       action={<Segmented label="Traffic range" options={RANGES} value={range} onChange={setRange} />}
     >
+      {traffic.data.stale || traffic.isError ? (
+        <p className="warn-line">Live traffic isn&apos;t updating right now, so these positions may be a few minutes old. Aircraft will have moved since.</p>
+      ) : null}
       <p className="stat-line">
         <span title={`Within ${PATTERN_NM} NM and below ${formatNumber(PATTERN_AGL)} ft AGL`}><strong>{pattern.length}</strong> near the pattern</span>
         <span title="Within 2 NM"><strong>{onGround.length}</strong> on the ground</span>

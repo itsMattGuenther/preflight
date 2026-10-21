@@ -6,6 +6,7 @@ const browser = {
   Blob: 'readonly',
   Intl: 'readonly',
   ReadableStream: 'readonly',
+  Request: 'readonly',
   Response: 'readonly',
   TextDecoderStream: 'readonly',
   TextEncoder: 'readonly',

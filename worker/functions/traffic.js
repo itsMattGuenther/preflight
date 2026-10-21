@@ -1,17 +1,23 @@
+import { cached } from '../lib/cache.js';
 import { coordinateParams, fetchJson, handler, json, badRequest } from '../lib/http.js';
 
 // adsb.lol's open data (ODbL, credited on the card and in the footer). adsb.fi
 // serves the same readsb format but refuses requests from Cloudflare Workers.
 const ADSB_LOL_URL = 'https://api.adsb.lol/v2';
 const MAX_RADIUS_NM = 40;
-const MEMO_TTL_MS = 8000;
 
-// adsb.lol's open API is free and rate limited. Identical requests that arrive
-// within a few seconds (several visitors watching the same airport) share one
-// upstream result while this Worker isolate is warm. Only finished results are
-// shared: Workers ties an in-flight fetch to the request that started it, so
-// another request must not wait on it.
-const memo = new Map();
+// adsb.lol's open API is free and rate limited, and Workers share outbound IP
+// addresses, so other sites' requests count against the same limit. Everyone
+// watching an airport shares one upstream result for TTL_MS, through the D1
+// cache. If adsb.lol refuses, the last result is served, marked stale, for up
+// to MAX_STALE_MS; older positions are no use as traffic.
+const TTL_MS = 20 * 1000;
+const MAX_STALE_MS = 5 * 60 * 1000;
+
+// After a 429, this isolate stops asking for at least COOLDOWN_MS instead of
+// retrying on every visitor's next refresh, which would keep the limit hit.
+const COOLDOWN_MS = 60 * 1000;
+let coolingUntil = 0;
 
 function clean(value) {
   return typeof value === 'string' ? value.trim() : value;
@@ -44,8 +50,19 @@ function normalizeAircraft(ac) {
   };
 }
 
+function rateLimited() {
+  return Object.assign(new Error('429 from api.adsb.lol'), { status: 429 });
+}
+
 async function load(center, radius) {
-  const body = await fetchJson(`${ADSB_LOL_URL}/lat/${center.lat}/lon/${center.lon}/dist/${radius}`, { timeoutMs: 7000 });
+  if (Date.now() < coolingUntil) throw rateLimited();
+  let body;
+  try {
+    body = await fetchJson(`${ADSB_LOL_URL}/lat/${center.lat}/lon/${center.lon}/dist/${radius}`, { timeoutMs: 7000 });
+  } catch (error) {
+    if (error.status === 429) coolingUntil = Date.now() + Math.max(COOLDOWN_MS, (error.retryAfterSeconds || 0) * 1000);
+    throw error;
+  }
   return (body.ac || [])
     .filter((ac) => Number.isFinite(Number(ac.lat)) && Number.isFinite(Number(ac.lon)))
     .map(normalizeAircraft)
@@ -58,19 +75,25 @@ export default handler(async (req) => {
   if (!center) return badRequest('lat and lon are required');
   const radius = Math.min(MAX_RADIUS_NM, Math.max(5, Math.round(Number(url.searchParams.get('radius_nm')) || 25)));
   const rounded = { lat: Math.round(center.lat * 1000) / 1000, lon: Math.round(center.lon * 1000) / 1000 };
-  const key = `${rounded.lat},${rounded.lon},${radius}`;
+  const key = `traffic/v1/${rounded.lat},${rounded.lon},${radius}`;
 
-  const now = Date.now();
-  let entry = memo.get(key);
-  if (!entry || now - entry.at > MEMO_TTL_MS) {
-    entry = { at: now, aircraft: await load(rounded, radius) };
-    memo.set(key, entry);
-    if (memo.size > 200) memo.delete(memo.keys().next().value);
+  let result;
+  try {
+    result = await cached(key, TTL_MS, () => load(rounded, radius), { maxStaleMs: MAX_STALE_MS });
+  } catch (error) {
+    if (error.status !== 429) throw error;
+    // Nothing recent to fall back on. The app shows a calm "busy" note for
+    // this code and tries again once retry_after_s has passed.
+    const retryAfter = Math.max(1, Math.ceil((coolingUntil - Date.now()) / 1000));
+    return json(
+      { error: 'Live traffic is busy', code: 'rate_limited', retry_after_s: retryAfter },
+      { status: 503, headers: { 'Retry-After': String(retryAfter) } },
+    );
   }
-  const { aircraft } = entry;
+  const { value: aircraft, cached_utc, stale } = result;
 
   return json(
-    { fetched_utc: new Date(entry.at).toISOString(), source: 'adsb.lol', center: rounded, radius_nm: radius, count: aircraft.length, aircraft },
+    { fetched_utc: cached_utc, stale, source: 'adsb.lol', center: rounded, radius_nm: radius, count: aircraft.length, aircraft },
     { headers: { 'Cache-Control': 'public, max-age=10' } },
   );
 });

@@ -163,7 +163,7 @@ Preflight runs on Cloudflare Workers, on the free plan. `wrangler.jsonc` says ho
 
 - **The app** (`dist/`, what `npm run build` writes) is served as static files, which cost nothing however often they're loaded. `public/_headers` sets their response headers.
 - **The API** is one Worker, `worker/index.js`. Only `/api/*` requests run it; `/api/weather` runs `worker/functions/weather.js`, and so on.
-- **The cache** (`worker/lib/cache.js`) keeps slow or rate-limited sources (AirNav, the national TFR list, FAA chart indexes) in memory and in a D1 database, `preflight`. Previews use their own database, `preflight-preview`, so preview code never writes into production's cache. The table is in `worker/migrations/`.
+- **The cache** (`worker/lib/cache.js`) keeps slow or rate-limited sources (AirNav, the national TFR list, FAA chart indexes, live traffic) in memory and in a D1 database, `preflight`. Previews use their own database, `preflight-preview`, so preview code never writes into production's cache. The table is in `worker/migrations/`.
 
 Workers Builds is connected to this repo:
 
@@ -175,7 +175,7 @@ The free plan's limits shape the API code:
 
 - **10 ms of CPU per request.** Waiting on upstream sources doesn't count, but parsing does. That's why `charts.js` reads the FAA's 16 MB d-TPP index only as far as the one airport it needs instead of parsing all of it. Keep new parsing small, and check a preview's CPU time in the Worker's Observability tab.
 - **50 outgoing fetches per request.** The fuel function, the busiest, makes at most 13.
-- **100,000 API requests a day**, shared by every Worker on the account, reset at midnight UTC. Static files don't count. An open dashboard makes about 290 requests an hour (live traffic refreshes every 15 seconds), and polling stops in background tabs.
+- **100,000 API requests a day**, shared by every Worker on the account, reset at midnight UTC. Static files don't count. An open dashboard makes about 170 requests an hour (live traffic refreshes every 30 seconds), and polling stops in background tabs.
 
 Settings that live in Cloudflare, not in this repo:
 
@@ -210,7 +210,7 @@ Not sure where to start? Open an [issue](../../issues) — bug reports, feature 
 - **Density altitude** uses the standard rule-of-thumb formula, not a POH performance calculation.
 - **Special use airspace** (MOAs, restricted areas) and airspace classes are not shown.
 - **Fuel prices and fallback frequencies** come from third-party pages whose formats change; always confirm against the Chart Supplement and the FBO.
-- **ADS-B traffic** depends on adsb.lol coverage, which is incomplete near the ground. Not every aircraft broadcasts ADS-B.
+- **ADS-B traffic** depends on adsb.lol coverage, which is incomplete near the ground. Not every aircraft broadcasts ADS-B. adsb.lol is free and rate limited, and Cloudflare Workers share outbound IP addresses, so it sometimes refuses; the card then shows the last positions, marked as old, for up to five minutes, and otherwise says live traffic is busy.
 - **Winds aloft** cover the contiguous U.S. only.
 
 ---
