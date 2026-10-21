@@ -8,15 +8,16 @@ export async function apiFetch(name, params = {}) {
     headers: { Authorization: `Bearer ${TOKEN}` },
   });
   if (!res.ok) {
-    let message = `${res.status}`;
+    let body = {};
     try {
-      const body = await res.json();
-      message = body.error || message;
+      body = await res.json();
     } catch {
       // Non-JSON error body; keep the status code.
     }
-    const error = new Error(message);
+    const error = new Error(body.error || `${res.status}`);
     error.status = res.status;
+    // A known condition the card explains in its own words, e.g. 'rate_limited'.
+    error.code = body.code;
     throw error;
   }
   return res.json();

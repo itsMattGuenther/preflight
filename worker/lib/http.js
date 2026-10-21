@@ -69,18 +69,29 @@ export async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, he
   }
 }
 
+// The error for an upstream status that isn't OK. It carries the status, and
+// how many seconds a rate-limited source asked us to wait, so a function can
+// treat "too many requests" differently from "broken".
+function upstreamError(res, url) {
+  const error = new Error(`${res.status} from ${new URL(url).host}`);
+  error.status = res.status;
+  const wait = Number(res.headers.get('retry-after') ?? res.headers.get('x-ratelimit-reset'));
+  if (wait > 0) error.retryAfterSeconds = wait;
+  return error;
+}
+
 export async function fetchJson(url, options = {}) {
   const res = await fetchWithTimeout(url, { ...options, headers: { Accept: 'application/json', ...(options.headers || {}) } });
   // AviationWeather answers "no data" with 204, which is a valid empty result.
   if (res.status === 204) return [];
-  if (!res.ok) throw new Error(`${res.status} from ${new URL(url).host}`);
+  if (!res.ok) throw upstreamError(res, url);
   const text = await res.text();
   return text ? JSON.parse(text) : [];
 }
 
 export async function fetchText(url, options = {}) {
   const res = await fetchWithTimeout(url, options);
-  if (!res.ok) throw new Error(`${res.status} from ${new URL(url).host}`);
+  if (!res.ok) throw upstreamError(res, url);
   return res.text();
 }
 
