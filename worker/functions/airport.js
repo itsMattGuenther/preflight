@@ -9,7 +9,7 @@ import {
 } from '../lib/airportData.js';
 import { cached, TTL_OVERRIDE } from '../lib/cache.js';
 import fallbackAirports from '../lib/data/airports-fallback.json';
-import { bearingDeg, distanceNm, round1 } from '../lib/geo.js';
+import { bboxParam, bearingDeg, distanceNm, round1 } from '../lib/geo.js';
 import { fetchJson, fetchText, handler, json, normalizeIcao, badRequest } from '../lib/http.js';
 
 const API_BASE = 'https://aviationweather.gov/api/data';
@@ -116,7 +116,7 @@ async function scrapedFrequencies(icao, faaId) {
 
 async function nearbyStations(center, selfId) {
   const delta = 0.75;
-  const bbox = `${center.lat - delta},${center.lon - delta},${center.lat + delta},${center.lon + delta}`;
+  const bbox = bboxParam({ minLat: center.lat - delta, minLon: center.lon - delta, maxLat: center.lat + delta, maxLon: center.lon + delta });
   const stations = await fetchJson(`${API_BASE}/stationinfo?bbox=${bbox}&format=json`).catch(() => []);
   return (Array.isArray(stations) ? stations : [])
     .filter((station) => station.icaoId && station.icaoId !== selfId && Number.isFinite(Number(station.lat)) && Number.isFinite(Number(station.lon)))

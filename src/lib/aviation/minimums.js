@@ -131,6 +131,7 @@ export function evaluateMinimums({
   metar,
   metarSource,
   taf,
+  weatherUnavailable = [],
   sun,
   tfrs,
   tfrsStale = false,
@@ -152,13 +153,13 @@ export function evaluateMinimums({
     return {
       verdict: 'unknown',
       checks: [],
-      notChecked: ['Weather (no observation or forecast covers this window)'],
+      notChecked: [weatherUnavailable.length ? "Weather (couldn't be loaded)" : 'Weather (no observation or forecast covers this window)'],
     };
   }
 
   const futureOnly = startMs > now + 45 * 60 * 1000;
   const coverage = tafCoverage(taf, Math.max(startMs, now), endMs);
-  if (!taf) notChecked.push('Forecast (no TAF within 40 NM)');
+  if (!taf) notChecked.push(weatherUnavailable.includes('TAF') ? "Forecast (couldn't be loaded)" : 'Forecast (no TAF within 40 NM)');
   else if (coverage < 0.99 && endMs > now) notChecked.push('End of your flight window (past the TAF)');
 
   checks.push(evaluateNumeric({

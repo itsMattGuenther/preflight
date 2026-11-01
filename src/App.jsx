@@ -127,6 +127,7 @@ export default function App() {
       metar: weather.data?.metar,
       metarSource: weather.data?.metar_source,
       taf: weather.data?.taf,
+      weatherUnavailable: weather.data?.unavailable,
       sun: sunForFlight,
       // undefined = still loading, null = feed failed.
       tfrs: tfrs.isPending ? undefined : tfrs.isError ? null : tfrs.data?.tfrs,

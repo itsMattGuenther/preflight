@@ -83,3 +83,10 @@ export function boundingBox(center, radiusNm) {
     maxLon: center.lon + dLon,
   };
 }
+
+// A box as AviationWeather's `bbox` parameter ("minLat,minLon,maxLat,maxLon").
+// It answers 400 to long decimals such as 35.57833333333333, so every corner
+// is rounded to 4 places (about 10 m).
+export function bboxParam(box) {
+  return [box.minLat, box.minLon, box.maxLat, box.maxLon].map((value) => value.toFixed(4)).join(',');
+}

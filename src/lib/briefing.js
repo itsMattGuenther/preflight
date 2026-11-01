@@ -12,7 +12,7 @@ export function buildBriefing({ airport, weather, evaluation, windowRange, sun, 
   const lines = [];
   lines.push(`${airport.icao} ${airport.name}: Preflight summary`);
   if (windowRange) {
-    lines.push(`Flight window: ${formatLocal(windowRange.startMs, tz)}-${formatLocal(windowRange.endMs, tz)} ${zoneAbbreviation(tz)} (${formatZulu(windowRange.startMs)}-${formatZulu(windowRange.endMs)})`);
+    lines.push(`Flight window: ${formatLocal(windowRange.startMs, tz)}-${formatLocal(windowRange.endMs, tz)} ${zoneAbbreviation(tz, new Date(windowRange.startMs))} (${formatZulu(windowRange.startMs)}-${formatZulu(windowRange.endMs)})`);
   }
   if (evaluation) {
     lines.push(`Personal minimums: ${VERDICTS[evaluation.verdict].label.toUpperCase()}`);

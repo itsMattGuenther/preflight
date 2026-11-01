@@ -49,7 +49,7 @@ export function MinimumsCard({ evaluation, flightWindow, onWindowChange, windowR
           <div className="verdict-label">{stillLoading ? 'Checking conditions…' : verdict.label}</div>
           <div className="verdict-sub">
             {windowRange
-              ? `${evaluation?.futureOnly ? 'Departing' : 'Flying'} ${formatLocal(windowRange.startMs, timeZone)}–${formatLocal(windowRange.endMs, timeZone)} ${zoneAbbreviation(timeZone)} (${formatZulu(windowRange.startMs)}–${formatZulu(windowRange.endMs)})`
+              ? `${evaluation?.futureOnly ? 'Departing' : 'Flying'} ${formatLocal(windowRange.startMs, timeZone)}–${formatLocal(windowRange.endMs, timeZone)} ${zoneAbbreviation(timeZone, new Date(windowRange.startMs))} (${formatZulu(windowRange.startMs)}–${formatZulu(windowRange.endMs)})`
               : null}
           </div>
         </div>

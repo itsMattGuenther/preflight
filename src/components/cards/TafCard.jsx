@@ -56,10 +56,14 @@ export function TafCard({ weather, airport, windowRange, now }) {
   if (!taf) {
     return (
       <Card title="Forecast (TAF)" icon={CalendarClock} className="area-taf">
-        <Notice tone="warning">
-          No TAF within 40 NM. Use the{' '}
-          <a href="https://aviationweather.gov/gfa/" target="_blank" rel="noreferrer">Graphical Forecasts for Aviation</a> and a standard briefing for the forecast.
-        </Notice>
+        {weather.data?.unavailable?.includes('TAF') ? (
+          <ErrorNote what="the forecast for this airport or the stations near it" onRetry={weather.refetch} />
+        ) : (
+          <Notice tone="warning">
+            No TAF within 40 NM. Use the{' '}
+            <a href="https://aviationweather.gov/gfa/" target="_blank" rel="noreferrer">Graphical Forecasts for Aviation</a> and a standard briefing for the forecast.
+          </Notice>
+        )}
       </Card>
     );
   }
