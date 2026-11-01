@@ -1,5 +1,5 @@
 import { cached } from '../lib/cache.js';
-import { bearingDeg, boundingBox, distanceNm, distanceToPolygonNm, distanceToRingNm, round1, toRing } from '../lib/geo.js';
+import { bboxParam, bearingDeg, boundingBox, distanceNm, distanceToPolygonNm, distanceToRingNm, round1, toRing } from '../lib/geo.js';
 import { coordinateParams, fetchJson, handler, json, badRequest } from '../lib/http.js';
 import { toIso, toNumber } from '../lib/wx.js';
 
@@ -166,8 +166,9 @@ function pirepSummary(item) {
 }
 
 async function pireps(center) {
-  const box = boundingBox(center, PIREP_RADIUS_NM);
-  const list = await fetchJson(`${API_BASE}/pirep?bbox=${box.minLat},${box.minLon},${box.maxLat},${box.maxLon}&age=3&format=json`).catch(() => []);
+  // A failed request rejects, so the handler lists PIREPs as unavailable
+  // instead of the card saying there are no reports.
+  const list = await fetchJson(`${API_BASE}/pirep?bbox=${bboxParam(boundingBox(center, PIREP_RADIUS_NM))}&age=3&format=json`);
   return (Array.isArray(list) ? list : [])
     .filter((item) => Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lon)))
     .filter((item) => item.fltLvl == null || Number(item.fltLvl) <= PIREP_MAX_FL)

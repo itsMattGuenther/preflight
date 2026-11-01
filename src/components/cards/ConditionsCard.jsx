@@ -56,7 +56,11 @@ export function ConditionsCard({ weather, airport, lastSeen, now }) {
   if (!metar) {
     return (
       <Card title="Current conditions" icon={Cloud} className="area-conditions">
-        <Notice tone="warning">No current weather observation at or within 30 NM of this airport. Check the area forecast and nearby stations before flying.</Notice>
+        {weather.data?.unavailable?.includes('METAR') ? (
+          <ErrorNote what="current weather for this airport or the stations near it" onRetry={weather.refetch} />
+        ) : (
+          <Notice tone="warning">No current weather observation at or within 30 NM of this airport. Check the area forecast and nearby stations before flying.</Notice>
+        )}
       </Card>
     );
   }

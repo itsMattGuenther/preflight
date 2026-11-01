@@ -103,6 +103,7 @@ function Pireps({ advisories, now }) {
   if (advisories.isPending) return <Skeleton lines={2} />;
   if (advisories.isError) return null;
   const pireps = advisories.data?.pireps || [];
+  if (advisories.data?.unavailable?.includes('PIREPs')) return <p className="warn-line">Pilot reports couldn&apos;t be loaded; check aviationweather.gov.</p>;
   if (!pireps.length) return <Clear>No reports below FL180 within {advisories.data?.pirep_radius_nm || 60} NM in 3 hours</Clear>;
   return (
     <ul className="hz-list">
