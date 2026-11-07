@@ -244,6 +244,8 @@ What I've checked so far has mostly been hands-on:
 - Manual testing in the browser against a range of real U.S. airports (towered and non-towered, single- and multi-runway, with and without live fuel/NOTAM data)
 - That each panel degrades gracefully when its data source is unavailable or returns nothing
 - ESLint passes cleanly
+- An automated test suite (`npm test`) covering the aviation math, METAR/TAF parsing, the minimums check, and what the API does when a data source fails or rate-limits it. Claude wrote these tests too, so they only catch what we thought to check.
+- A review of the finished launch branch by a separate Claude agent, looking for ways missing or tricky data could make conditions look better than they are. It found real problems, like a METAR with no wind report still showing "Within your minimums". Those are fixed, with tests for the minimums check. It's still no substitute for a person reading the code.
 
 That leaves plenty I'd genuinely welcome a second set of eyes on:
 
