@@ -1,5 +1,0 @@
-# Preflight moved to Cloudflare (wrangler.jsonc) on 2026-10-18. Until the
-# Netlify project is deleted, this cancels every Netlify build, so a merge here
-# never costs Netlify credits. Delete this file when the project goes.
-[build]
-  ignore = "exit 0"

@@ -7,7 +7,6 @@ dist
 .env.local
 .DS_Store
 npm-debug.log*
-.netlify-dev*.log
 
 # Internal design doc — kept locally, not published
 preflight_design_doc.md

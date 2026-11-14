@@ -1,4 +1,4 @@
-// One React Query hook per Netlify function. Polling intervals match how fast
+// One React Query hook per API endpoint. Polling intervals match how fast
 // each source changes; everything also refreshes when the pilot comes back to
 // the tab after the data has gone stale.
 import { useQuery } from '@tanstack/react-query';
