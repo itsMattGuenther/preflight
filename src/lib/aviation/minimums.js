@@ -13,7 +13,7 @@ import { isActiveDuring, classifyNotam } from './notam.js';
 
 export const MINIMUM_FIELDS = [
   { key: 'ceiling_ft', label: 'Lowest ceiling', unit: 'ft AGL', min: 500, max: 10000, step: 100, type: 'min' },
-  { key: 'visibility_sm', label: 'Lowest visibility', unit: 'SM', min: 1, max: 10, step: 0.5, type: 'min' },
+  { key: 'visibility_sm', label: 'Lowest visibility', unit: 'SM', min: 1, max: 10, step: 0.5, type: 'min', hint: 'METARs report up to 10, TAFs up to 6+' },
   { key: 'wind_kt', label: 'Highest surface wind', unit: 'kt', min: 0, max: 40, step: 1, type: 'max' },
   { key: 'gust_kt', label: 'Highest gust', unit: 'kt', min: 0, max: 50, step: 1, type: 'max' },
   { key: 'gust_spread_kt', label: 'Largest gust spread', unit: 'kt', min: 0, max: 25, step: 1, type: 'max', hint: 'Gust minus steady wind' },
@@ -99,14 +99,21 @@ function check(id, label, limitText) {
   return { id, label, status: 'pass', value: '--', limit: limitText, note: null };
 }
 
-function evaluateNumeric({ id, label, sets, getValue, limit, type, marginPct, format, limitText }) {
+// `atLeast` says when a report gives only a lower bound, such as P6SM ("more
+// than 6") in a TAF or 10SM, the most a METAR reports. A bound at or above a
+// minimum meets it, margin or not; a bound below it can't say either way.
+function evaluateNumeric({ id, label, sets, getValue, atLeast, limit, type, marginPct, format, limitText, boundNote }) {
   let result = { ...check(id, label, limitText), status: 'unknown', value: 'No data' };
   let found = false;
   for (const set of sets) {
     const value = getValue(set.conditions);
     if (value == null) continue;
-    const status = softenFor(set.kind, limitStatus(value, limit, type, marginPct));
-    const candidate = { ...check(id, label, limitText), status, value: format(value), note: set.label, raw: value };
+    const bound = type === 'min' && atLeast?.(set.conditions) === true;
+    let status = limitStatus(value, limit, type, marginPct);
+    if (bound && status) status = value >= limit ? 'pass' : 'unknown';
+    status = softenFor(set.kind, status);
+    const note = bound && status === 'unknown' ? `${set.label} · ${boundNote(value)}` : set.label;
+    const candidate = { ...check(id, label, limitText), status, value: format(value, bound), note, raw: value };
     if (!found) {
       result = candidate;
       found = true;
@@ -167,8 +174,9 @@ export function evaluateMinimums({
     format: (value) => (value >= 99999 ? 'None' : formatFeet(value)), limitText: `${formatFeet(m.ceiling_ft)}+`,
   }));
   checks.push(evaluateNumeric({
-    id: 'visibility', label: 'Visibility', sets, getValue: (c) => c.visibility_sm, limit: m.visibility_sm, type: 'min', marginPct: margin,
-    format: (value) => formatVisibility(value), limitText: `${formatVisibility(m.visibility_sm)}+`,
+    id: 'visibility', label: 'Visibility', sets, getValue: (c) => c.visibility_sm, atLeast: (c) => c.visibility_plus, limit: m.visibility_sm, type: 'min', marginPct: margin,
+    format: (value, bound) => formatVisibility(value, bound), limitText: `${formatVisibility(m.visibility_sm)}+`,
+    boundNote: (value) => `reported only as more than ${formatVisibility(value)}, so your ${formatVisibility(m.visibility_sm)} limit can't be confirmed`,
   }));
   checks.push(evaluateNumeric({
     id: 'wind', label: 'Surface wind', sets, getValue: (c) => c.wind_speed_kt, limit: m.wind_kt, type: 'max', marginPct: margin,
