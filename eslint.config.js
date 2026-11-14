@@ -23,7 +23,7 @@ const browser = {
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', '.netlify/**', '.wrangler/**'],
+    ignores: ['dist/**', 'node_modules/**', '.wrangler/**'],
   },
   {
     files: ['src/**/*.{js,jsx}', 'worker/**/*.js', 'scripts/**/*.mjs'],
