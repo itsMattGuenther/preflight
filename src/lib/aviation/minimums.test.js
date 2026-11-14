@@ -216,3 +216,40 @@ describe('evaluateMinimums', () => {
     expect(statusOf(evaluate({ advisories }), 'advisories')).toBe('caution');
   });
 });
+
+describe('visibility reported as "more than" (P6SM, 10SM)', () => {
+  const tenMile = { ...DEFAULT_MINIMUMS, visibility_sm: 10 };
+  const visibility = (result) => result.checks.find((item) => item.id === 'visibility');
+  const forecast = (period) => ({
+    valid_from_utc: '2026-10-01T18:00:00Z',
+    valid_to_utc: '2026-10-02T18:00:00Z',
+    periods: [{
+      change: 'BASE', from_utc: '2026-10-01T18:00:00Z', to_utc: '2026-10-02T18:00:00Z',
+      wind_dir_deg: 180, wind_speed_kt: 6, wx: '', clouds: [{ cover: 'FEW', base_ft: 6000 }], ceiling_ft: null, ...period,
+    }],
+  });
+
+  it('meets a 10 SM limit with a 10+ SM METAR instead of calling it close', () => {
+    const result = evaluate({ minimums: tenMile });
+    expect(visibility(result)).toMatchObject({ status: 'pass', value: '10+ SM' });
+    expect(result.verdict).toBe('within');
+  });
+
+  it("can't confirm a 10 SM limit from a P6SM forecast, and doesn't fail it", () => {
+    const result = evaluate({ minimums: tenMile, taf: forecast({ visibility_sm: 6, visibility_plus: true }) });
+    expect(visibility(result)).toMatchObject({ status: 'unknown', value: '6+ SM' });
+    expect(visibility(result).note).toMatch(/more than 6 SM.*10 SM limit can't be confirmed/);
+    expect(result.verdict).toBe('unknown');
+  });
+
+  it('meets a lower limit with P6SM, inside the margin or not', () => {
+    const atLimit = evaluate({ minimums: { ...DEFAULT_MINIMUMS, visibility_sm: 6 }, taf: forecast({ visibility_sm: 6, visibility_plus: true }) });
+    expect(statusOf(atLimit, 'visibility')).toBe('pass');
+    expect(statusOf(evaluate({ taf: forecast({ visibility_sm: 6, visibility_plus: true }) }), 'visibility')).toBe('pass');
+  });
+
+  it('still fails and cautions on visibility reported exactly', () => {
+    expect(statusOf(evaluate({ minimums: tenMile, taf: forecast({ visibility_sm: 6, visibility_plus: false }) }), 'visibility')).toBe('fail');
+    expect(statusOf(evaluate({ metar: metar({ visibility_sm: 5, visibility_plus: false }) }), 'visibility')).toBe('caution');
+  });
+});
