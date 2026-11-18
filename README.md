@@ -182,6 +182,7 @@ Settings that live in Cloudflare, not in this repo:
 - `API_AUTH_TOKEN`: a Worker secret, set once for production (`npx wrangler secret put API_AUTH_TOKEN`) and once for every preview (`npx wrangler preview base-config secret put API_AUTH_TOKEN`).
 - `VITE_API_AUTH_TOKEN`: a build variable in Workers Builds (Settings → Build → Variables and secrets), the same value as `API_AUTH_TOKEN`, because Vite compiles it into the app.
 - `preflight.mattguenther.com` is the Worker's custom domain, from `routes` in `wrangler.jsonc`; Cloudflare makes its DNS record and certificate.
+- `ADSB_RELAY_KEY`: a Worker secret, set for production (`npx wrangler secret put ADSB_RELAY_KEY`) and for previews (`npx wrangler preview base-config secret put ADSB_RELAY_KEY`). Live traffic goes through a relay at `adsb-relay.mattguenther.com`, because adsb.lol allows each address 500 requests a day and every Cloudflare Worker shares one address (#11). The relay is a block in the Caddy config on the server that hosts Linger, with its DNS record set to DNS only. It forwards only the traffic request, and only with this key. Without the key, or when the relay fails, the Worker asks adsb.lol directly.
 
 ---
 
