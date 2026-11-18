@@ -122,4 +122,80 @@ describe('traffic', () => {
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: '404 from api.adsb.lol' });
   });
+
+  describe('with the relay (ADSB_RELAY_KEY set)', () => {
+    const relayEnv = { ...env, ADSB_RELAY_KEY: 'relay-key' };
+    const isRelay = (url) => String(url).startsWith('https://adsb-relay.mattguenther.com/');
+    // One fetch stand-in that answers the relay and adsb.lol differently.
+    const routes = ({ relay, direct }) => vi.fn(async (url) => (isRelay(url) ? relay() : direct()));
+    const calls = (fetch, which) => fetch.mock.calls.filter(([url]) => isRelay(url) === (which === 'relay')).length;
+
+    it('asks through the relay first, with its key', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-10-22T08:00:00Z'));
+      const fetch = routes({ relay: () => upstream(200, aircraft), direct: () => upstream(500) });
+      vi.stubGlobal('fetch', fetch);
+      const res = await traffic(request(45.1, -105.1), relayEnv);
+      expect(await res.json()).toMatchObject({ via: 'relay', stale: false, count: 1 });
+      const [url, init] = fetch.mock.calls[0];
+      expect(url).toBe('https://adsb-relay.mattguenther.com/v2/lat/45.1/lon/-105.1/dist/25');
+      expect(init.headers['X-Relay-Key']).toBe('relay-key');
+      expect(calls(fetch, 'direct')).toBe(0);
+    });
+
+    it('asks adsb.lol directly when the relay turns it away', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-10-22T09:00:00Z'));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // A wrong key, for one, gets a 404 from the relay.
+      const fetch = routes({ relay: () => upstream(404), direct: () => upstream(200, aircraft) });
+      vi.stubGlobal('fetch', fetch);
+      const res = await traffic(request(46.1, -106.1), relayEnv);
+      expect(await res.json()).toMatchObject({ via: 'direct', count: 1 });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('404 from adsb-relay.mattguenther.com'));
+      warn.mockRestore();
+    });
+
+    it('waits out a rate-limited relay on its own, asking adsb.lol directly meanwhile', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-10-22T10:00:00Z'));
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const fetch = routes({ relay: () => upstream(429), direct: () => upstream(200, aircraft) });
+      vi.stubGlobal('fetch', fetch);
+      expect(await (await traffic(request(47.1, -107.1), relayEnv)).json()).toMatchObject({ via: 'direct' });
+
+      vi.setSystemTime(new Date('2026-10-22T10:00:30Z'));
+      expect(await (await traffic(request(47.2, -107.2), relayEnv)).json()).toMatchObject({ via: 'direct' });
+      expect(calls(fetch, 'relay')).toBe(1);
+      expect(calls(fetch, 'direct')).toBe(2);
+      vi.mocked(console.warn).mockRestore();
+    });
+
+    it('keeps using the relay while adsb.lol has locked the shared address out, and says when either is due back', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // Without the key, a 429 locks the direct route out for an hour, the
+      // way adsb.lol does once the shared address has used its day.
+      vi.setSystemTime(new Date('2026-10-22T11:00:00Z'));
+      vi.stubGlobal('fetch', vi.fn(async () => upstream(429, {}, { 'Retry-After': '3600' })));
+      expect((await traffic(request(48.1, -108.1), env)).status).toBe(503);
+
+      vi.setSystemTime(new Date('2026-10-22T11:01:00Z'));
+      let fetch = routes({ relay: () => upstream(200, aircraft), direct: () => upstream(200, aircraft) });
+      vi.stubGlobal('fetch', fetch);
+      const res = await traffic(request(48.2, -108.2), relayEnv);
+      expect(await res.json()).toMatchObject({ via: 'relay', count: 1 });
+      expect(calls(fetch, 'direct')).toBe(0);
+
+      // Both refused: the relay's minute is up first.
+      vi.setSystemTime(new Date('2026-10-22T11:05:00Z'));
+      fetch = routes({ relay: () => upstream(429), direct: () => upstream(200, aircraft) });
+      vi.stubGlobal('fetch', fetch);
+      const busy = await traffic(request(48.3, -108.3), relayEnv);
+      expect(busy.status).toBe(503);
+      expect(await busy.json()).toMatchObject({ code: 'rate_limited', retry_after_s: 60 });
+      expect(calls(fetch, 'direct')).toBe(0);
+      vi.mocked(console.warn).mockRestore();
+    });
+  });
 });
